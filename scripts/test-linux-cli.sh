@@ -50,6 +50,13 @@ PY
 command -v "$PYTHON_BIN" >/dev/null 2>&1 || fail "$PYTHON_BIN was not found"
 version_ok || fail "Python 3.12+ is required"
 
+if [[ "${MIRA_SKIP_VALIDATION:-0}" != "1" ]]; then
+  info "Running local lint/unit/import validation first"
+  PYTHON_BIN="$PYTHON_BIN" MIRA_VALIDATION_VENV="$VENV_DIR" \
+    bash "$ROOT_DIR/scripts/validate-local.sh"
+  export MIRA_SKIP_INSTALL=1
+fi
+
 mkdir -p "$TEST_ROOT"
 rm -f "$TEST_ROOT/mira.db" "$TEST_ROOT/server.log" "$TEST_ROOT/agent.log" "$TEST_ROOT/target.log"
 
