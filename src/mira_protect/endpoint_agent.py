@@ -313,6 +313,57 @@ class EndpointAgent:
                 "message": "Local fallback decision while control plane is unavailable",
             }
 
+    def _report_enforcement(
+        self,
+        observation: dict[str, Any],
+        decision: dict[str, Any],
+        result: str,
+        *,
+        reason: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        decision_event_id = decision.get("event_id")
+        if not decision_event_id:
+            _log(
+                "enforcement_report_skipped",
+                pid=observation.get("pid"),
+                result=result,
+                reason="no_central_decision_event",
+            )
+            return
+
+        payload = {
+            "device_id": self.config.device_id,
+            "hostname": socket.gethostname(),
+            "username": observation.get("username") or _username(),
+            "pid": observation["pid"],
+            "process_name": observation["process_name"],
+            "decision_event_id": decision_event_id,
+            "action": str(decision.get("effective_action", "terminate")),
+            "result": result,
+            "mode": self.config.mode,
+            "agent_version": AGENT_VERSION,
+            "reason": reason,
+            "error": error,
+        }
+        try:
+            response = self.client.post("/api/v1/endpoint/enforcement", json=payload)
+            response.raise_for_status()
+            _log(
+                "enforcement_reported",
+                pid=observation["pid"],
+                decision_event_id=decision_event_id,
+                result=result,
+            )
+        except Exception as exc:
+            _log(
+                "enforcement_report_failed",
+                pid=observation["pid"],
+                decision_event_id=decision_event_id,
+                result=result,
+                error=str(exc),
+            )
+
     def _apply_decision(
         self,
         proc: psutil.Process,
@@ -331,6 +382,12 @@ class EndpointAgent:
                 mode=self.config.mode,
                 reason="agent_not_in_enforce_mode",
             )
+            self._report_enforcement(
+                observation,
+                decision,
+                "suppressed",
+                reason="agent_not_in_enforce_mode",
+            )
             return
 
         try:
@@ -346,13 +403,27 @@ class EndpointAgent:
                 process=observation["process_name"],
                 matched_rules=decision.get("matched_rules", []),
             )
-        except (psutil.NoSuchProcess, psutil.AccessDenied) as exc:
+            self._report_enforcement(observation, decision, "succeeded")
+        except psutil.NoSuchProcess:
+            _log(
+                "process_already_exited",
+                pid=proc.pid,
+                process=observation["process_name"],
+            )
+            self._report_enforcement(
+                observation,
+                decision,
+                "succeeded",
+                reason="process_already_exited",
+            )
+        except psutil.AccessDenied as exc:
             _log(
                 "process_termination_failed",
                 pid=proc.pid,
                 process=observation["process_name"],
                 error=str(exc),
             )
+            self._report_enforcement(observation, decision, "failed", error=str(exc))
 
 
 def _username() -> str | None:
