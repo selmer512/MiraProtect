@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hmac
+import os
 from uuid import NAMESPACE_URL, uuid5
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Header, HTTPException, Query, status
 
 from .catalog import get_catalog
 from .detection import DetectionEngine
@@ -40,6 +42,27 @@ risk_engine = RiskEngine()
 policy_engine = PolicyEngine()
 detection_engine = DetectionEngine()
 repository = Repository()
+
+
+def _require_endpoint_token(authorization: str | None) -> None:
+    """Require a shared endpoint token when MIRA_ENDPOINT_TOKEN is configured.
+
+    Authentication is optional for local labs so the prototype remains easy to run.
+    Enterprise tests should set MIRA_ENDPOINT_TOKEN and deploy the same value to the
+    managed endpoint through MIRA_AGENT_TOKEN.
+    """
+
+    expected = os.getenv("MIRA_ENDPOINT_TOKEN")
+    if not expected:
+        return
+    supplied = ""
+    if authorization and authorization.lower().startswith("bearer "):
+        supplied = authorization[7:].strip()
+    if not hmac.compare_digest(supplied, expected):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid Mira Protect endpoint token",
+        )
 
 
 def _process_event(event: AIEvent) -> tuple[AIEvent, list[DetectionFinding]]:
@@ -84,7 +107,13 @@ def _infer_process_provider(process_name: str, command_line: list[str]) -> tuple
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "service": "mira-protect", "version": "0.2.0"}
+    database = "ok" if repository.health() else "unavailable"
+    return {
+        "status": "ok" if database == "ok" else "degraded",
+        "service": "mira-protect",
+        "version": "0.2.0",
+        "database": database,
+    }
 
 
 @app.post("/api/v1/assets", response_model=AIAsset)
@@ -147,7 +176,11 @@ def dashboard_summary() -> DashboardSummary:
 
 
 @app.post("/api/v1/endpoint/heartbeat", response_model=AIAsset)
-def endpoint_heartbeat(heartbeat: EndpointHeartbeat) -> AIAsset:
+def endpoint_heartbeat(
+    heartbeat: EndpointHeartbeat,
+    authorization: str | None = Header(default=None),
+) -> AIAsset:
+    _require_endpoint_token(authorization)
     asset = AIAsset(
         asset_id=uuid5(NAMESPACE_URL, f"mira-protect-device:{heartbeat.device_id}"),
         kind=AssetKind.DEVICE,
@@ -189,7 +222,11 @@ def endpoint_heartbeat(heartbeat: EndpointHeartbeat) -> AIAsset:
 
 
 @app.post("/api/v1/endpoint/process/evaluate", response_model=EndpointDecision)
-def evaluate_endpoint_process(observation: EndpointProcessObservation) -> EndpointDecision:
+def evaluate_endpoint_process(
+    observation: EndpointProcessObservation,
+    authorization: str | None = Header(default=None),
+) -> EndpointDecision:
+    _require_endpoint_token(authorization)
     provider, product = _infer_process_provider(
         observation.process_name,
         observation.command_line,
@@ -234,7 +271,9 @@ def evaluate_endpoint_process(observation: EndpointProcessObservation) -> Endpoi
             message = "Policy blocked the process; endpoint agent should terminate it."
         elif observation.mode == EnforcementMode.GUARD:
             effective_action = "notify"
-            message = "Policy would block the process; guard mode records and notifies without termination."
+            message = (
+                "Policy would block the process; guard mode records and notifies without termination."
+            )
         else:
             effective_action = "observe"
             message = "Policy would block the process; monitor mode records only."
