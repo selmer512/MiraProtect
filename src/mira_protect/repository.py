@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
-from typing import Iterable, TypeVar
+from typing import Iterable
 
-from sqlalchemy import JSON, DateTime, String, create_engine, delete, select
+from sqlalchemy import JSON, DateTime, String, create_engine, delete, select, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
+from sqlalchemy.pool import StaticPool
 
 from .schemas import AIAsset, AIEvent, DetectionFinding
 
@@ -41,14 +42,14 @@ class FindingRecord(Base):
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-T = TypeVar("T")
-
-
 class Repository:
-    """Small persistence boundary used by the prototype.
+    """Persistence boundary for control-plane state.
 
     SQLite works out of the box for local execution and tests. PostgreSQL is selected by
-    setting MIRA_DATABASE_URL (the Docker stack does this automatically).
+    setting MIRA_DATABASE_URL; the Docker stack does this automatically. The repository
+    intentionally stores normalized Pydantic payloads as JSON while the prototype schema
+    evolves quickly. Stable graph/search columns can be promoted later without changing
+    collector contracts.
     """
 
     def __init__(self, database_url: str | None = None) -> None:
@@ -58,8 +59,21 @@ class Repository:
         kwargs: dict = {"pool_pre_ping": True}
         if self.database_url.startswith("sqlite"):
             kwargs["connect_args"] = {"check_same_thread": False}
+            if self.database_url.endswith(":memory:") or self.database_url in {
+                "sqlite://",
+                "sqlite+pysqlite://",
+            }:
+                kwargs["poolclass"] = StaticPool
         self.engine = create_engine(self.database_url, **kwargs)
         Base.metadata.create_all(self.engine)
+
+    def health(self) -> bool:
+        try:
+            with self.engine.connect() as connection:
+                connection.execute(text("SELECT 1"))
+            return True
+        except Exception:
+            return False
 
     def save_asset(self, asset: AIAsset) -> AIAsset:
         payload = asset.model_dump(mode="json")
