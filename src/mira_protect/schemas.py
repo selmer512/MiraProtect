@@ -61,6 +61,12 @@ class EnforcementMode(str, Enum):
     ENFORCE = "enforce"
 
 
+class EnforcementResult(str, Enum):
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    SUPPRESSED = "suppressed"
+
+
 class RiskLevel(str, Enum):
     LOW = "low"
     MEDIUM = "medium"
@@ -181,10 +187,13 @@ class ThreatCatalogItem(BaseModel):
 
 class DashboardSummary(BaseModel):
     assets: int = 0
+    managed_devices: int = 0
     events: int = 0
     findings: int = 0
     blocked_events: int = 0
     approval_events: int = 0
+    enforcement_actions: int = 0
+    enforcement_failures: int = 0
     critical_findings: int = 0
     high_findings: int = 0
     unapproved_assets: int = 0
@@ -252,4 +261,22 @@ class EndpointHeartbeat(BaseModel):
     platform: str
     platform_version: str | None = None
     ip_addresses: list[str] = Field(default_factory=list)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class EndpointEnforcementReport(BaseModel):
+    """Confirmation from an endpoint that a requested preventative action was attempted."""
+
+    device_id: str
+    hostname: str
+    username: str | None = None
+    pid: int = Field(ge=0)
+    process_name: str
+    decision_event_id: UUID
+    action: str
+    result: EnforcementResult
+    mode: EnforcementMode
+    agent_version: str = "0.2.0"
+    reason: str | None = None
+    error: str | None = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
