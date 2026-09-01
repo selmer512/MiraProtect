@@ -99,9 +99,10 @@ info "Starting Linux endpoint agent in enforce mode"
 mira-protect-agent >"$TEST_ROOT/agent.log" 2>&1 &
 AGENT_PID=$!
 
+ASSET_COUNT=0
 for _ in $(seq 1 40); do
   ASSET_COUNT="$(mira-protect --url "$CONTROL_PLANE_URL" --token "$TOKEN" --json summary 2>/dev/null \
-    | python -c 'import json,sys; print(json.load(sys.stdin).get("assets", 0))' 2>/dev/null || echo 0)"
+    | python -c 'import json,sys; print(json.load(sys.stdin).get("managed_devices", 0))' 2>/dev/null || echo 0)"
   if [[ "$ASSET_COUNT" -ge 1 ]]; then
     break
   fi
@@ -153,6 +154,17 @@ if [[ "$TARGET_RC" -eq 0 ]]; then
   fail "Synthetic target exited normally; expected security termination"
 fi
 
+REPORTED=0
+for _ in $(seq 1 40); do
+  if grep -q '"event": "enforcement_reported"' "$TEST_ROOT/agent.log" 2>/dev/null; then
+    REPORTED=1
+    break
+  fi
+  sleep 0.25
+done
+[[ "$REPORTED" -eq 1 ]] || fail "Endpoint did not confirm enforcement back to the control plane"
+pass "Endpoint confirmed enforcement to the control plane"
+
 SUMMARY_JSON="$(mira-protect --url "$CONTROL_PLANE_URL" --token "$TOKEN" --json summary)"
 EVENTS_JSON="$(mira-protect --url "$CONTROL_PLANE_URL" --token "$TOKEN" --json events --limit 100)"
 
@@ -163,19 +175,28 @@ import os
 summary = json.loads(os.environ["SUMMARY_JSON"])
 events = json.loads(os.environ["EVENTS_JSON"])
 
+if summary.get("managed_devices", 0) < 1:
+    raise SystemExit("No managed device was registered")
 if summary.get("blocked_events", 0) < 1:
     raise SystemExit("No blocked event was recorded")
+if summary.get("enforcement_actions", 0) < 1:
+    raise SystemExit("No successful enforcement confirmation was recorded")
 
-matched = False
+matched_policy = False
+matched_enforcement = False
 for event in events:
     detections = event.get("security", {}).get("detections", [])
     if "endpoint-synthetic-protection-test" in detections:
-        matched = True
-        break
-if not matched:
+        matched_policy = True
+    if event.get("event_type") == "endpoint.enforcement" and event.get("metadata", {}).get("result") == "succeeded":
+        matched_enforcement = True
+
+if not matched_policy:
     raise SystemExit("Synthetic protection rule was not present in persisted events")
+if not matched_enforcement:
+    raise SystemExit("Successful endpoint enforcement event was not persisted")
 PY
-pass "Blocked endpoint event persisted with the expected policy rule"
+pass "Policy decision and endpoint enforcement confirmation are both persisted"
 
 mira-protect --url "$CONTROL_PLANE_URL" --token "$TOKEN" summary
 
