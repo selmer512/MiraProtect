@@ -4,7 +4,7 @@ This is the first supported Mira Protect endpoint protection test path. It is de
 
 ## What this test proves
 
-The test starts a local Mira Protect control plane, runs the endpoint agent in `enforce` mode, registers the Linux device, launches a harmless synthetic process containing the Mira Protect test marker, receives a central `BLOCK` decision, terminates that process, persists the security event, and verifies the expected policy rule.
+The test performs local lint/unit/import validation, starts a Mira Protect control plane, runs the endpoint agent in `enforce` mode, registers the Linux device, launches a harmless synthetic process containing the Mira Protect test marker, receives a central `BLOCK` decision, terminates that process, reports the enforcement result back to the control plane, persists the decision and enforcement evidence, and verifies the expected policy rule.
 
 The synthetic target does not perform a malicious action. Its command line includes `--mira-protect-test-block`, which exists only to exercise the protection path safely.
 
@@ -24,15 +24,25 @@ Docker is not required for this first test. The test uses a temporary local SQLi
 From the repository root on branch `develop/initial-ai-security-platform`:
 
 ```bash
-chmod +x scripts/test-linux-cli.sh scripts/validate-local.sh
-./scripts/validate-local.sh
-./scripts/test-linux-cli.sh
+bash scripts/test-linux-cli.sh
+```
+
+The script automatically runs `scripts/validate-local.sh` first. To run validation separately:
+
+```bash
+bash scripts/validate-local.sh
+```
+
+To skip that validation on a repeat protection run:
+
+```bash
+MIRA_SKIP_VALIDATION=1 bash scripts/test-linux-cli.sh
 ```
 
 The protection test uses TCP port `18080` by default. Override it if required:
 
 ```bash
-MIRA_TEST_PORT=28080 ./scripts/test-linux-cli.sh
+MIRA_TEST_PORT=28080 bash scripts/test-linux-cli.sh
 ```
 
 Successful output ends with:
@@ -49,6 +59,22 @@ The test writes its logs and SQLite database to `.mira-test/`:
 .mira-test/target.log
 .mira-test/mira.db
 ```
+
+## Automated pass criteria
+
+The script fails unless all of the following occur:
+
+1. The package installs successfully in a Python 3.12+ virtual environment.
+2. Ruff completes successfully.
+3. Pytest completes successfully.
+4. The application, CLI, and endpoint agent import successfully.
+5. The control plane reports healthy database state.
+6. The Linux endpoint heartbeat is registered as a managed device.
+7. The synthetic process is discovered by the endpoint agent.
+8. `endpoint-synthetic-protection-test` returns a central `BLOCK` decision.
+9. The endpoint agent terminates the synthetic target in `enforce` mode.
+10. The agent reports successful enforcement back to the control plane.
+11. The policy decision and enforcement confirmation are persisted.
 
 ## Manual CLI test
 
@@ -94,7 +120,7 @@ source .venv/bin/activate
 mira-protect synthetic-target --seconds 120 --mira-protect-test-block
 ```
 
-The target should be terminated by the agent. The agent terminal should record a `process_terminated` event.
+The target should be terminated by the agent. The agent terminal should record both `process_terminated` and `enforcement_reported` events.
 
 Inspect the resulting control-plane data:
 
@@ -104,6 +130,8 @@ mira-protect assets
 mira-protect events --limit 20
 mira-protect findings --limit 20
 ```
+
+The summary should show at least one managed device, one blocked event, and one successful enforcement action.
 
 ## Expected security path
 
@@ -115,7 +143,8 @@ Linux process
    -> endpoint-synthetic-protection-test = BLOCK
    -> enforce decision returned to agent
    -> process terminated
-   -> event persisted
+   -> endpoint.enforcement confirmation
+   -> decision and enforcement evidence persisted
 ```
 
 ## Rollout behavior
