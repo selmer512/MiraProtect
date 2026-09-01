@@ -28,7 +28,9 @@ dev = [
 ]
 
 [project.scripts]
+mira-protect = "mira_protect.cli:main"
 mira-protect-agent = "mira_protect.endpoint_agent:main"
+mira-protect-server = "mira_protect.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
