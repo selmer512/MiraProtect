@@ -76,14 +76,24 @@ class Repository:
             return False
 
     def save_asset(self, asset: AIAsset) -> AIAsset:
-        payload = asset.model_dump(mode="json")
+        now = datetime.now(timezone.utc)
         with Session(self.engine) as session:
             existing = session.get(AssetRecord, str(asset.asset_id))
             if existing:
-                existing.payload = payload
-                existing.updated_at = datetime.now(timezone.utc)
+                previous = AIAsset.model_validate(existing.payload)
+                asset.first_seen = previous.first_seen
+                asset.last_seen = now
+                existing.payload = asset.model_dump(mode="json")
+                existing.updated_at = now
             else:
-                session.add(AssetRecord(id=str(asset.asset_id), payload=payload))
+                asset.last_seen = now
+                session.add(
+                    AssetRecord(
+                        id=str(asset.asset_id),
+                        payload=asset.model_dump(mode="json"),
+                        updated_at=now,
+                    )
+                )
             session.commit()
         return asset
 
