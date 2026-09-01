@@ -1,0 +1,146 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any
+from uuid import UUID, uuid4
+
+from pydantic import BaseModel, Field
+
+
+class DeploymentType(str, Enum):
+    EMBEDDED = "embedded"
+    VENDOR_UI = "vendor_ui"
+    MODEL_API = "model_api"
+    ENTERPRISE_LICENSED = "enterprise_licensed"
+    PRETRAINED_OR_FINETUNED = "pretrained_or_finetuned"
+    SPECIALIZED = "specialized"
+    CUSTOM = "custom"
+    UNKNOWN = "unknown"
+
+
+class AssetKind(str, Enum):
+    AI_SYSTEM = "ai_system"
+    MODEL = "model"
+    AGENT = "agent"
+    TOOL = "tool"
+    MCP_SERVER = "mcp_server"
+    RAG_PIPELINE = "rag_pipeline"
+    VECTOR_STORE = "vector_store"
+    DATA_SOURCE = "data_source"
+    IDENTITY = "identity"
+    APPLICATION = "application"
+    DEVICE = "device"
+    PROVIDER = "provider"
+
+
+class EventType(str, Enum):
+    INTERACTION = "ai.interaction"
+    TOOL_CALL = "ai.tool_call"
+    MODEL_CALL = "ai.model_call"
+    DATA_ACCESS = "ai.data_access"
+    ACTION = "ai.action"
+    POLICY_DECISION = "ai.policy_decision"
+    DETECTION = "ai.detection"
+    ASSET_DISCOVERED = "ai.asset_discovered"
+
+
+class PolicyDecision(str, Enum):
+    ALLOW = "allow"
+    BLOCK = "block"
+    REQUIRE_APPROVAL = "require_approval"
+    MONITOR = "monitor"
+
+
+class RiskLevel(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class Actor(BaseModel):
+    user_id: str | None = None
+    device_id: str | None = None
+    identity: str | None = None
+    source_ip: str | None = None
+
+
+class AIContext(BaseModel):
+    provider: str | None = None
+    product: str | None = None
+    model: str | None = None
+    deployment_type: DeploymentType = DeploymentType.UNKNOWN
+    agent_id: str | None = None
+    session_id: str | None = None
+
+
+class DataContext(BaseModel):
+    classifications: list[str] = Field(default_factory=list)
+    sources: list[str] = Field(default_factory=list)
+    destinations: list[str] = Field(default_factory=list)
+    contains_sensitive_data: bool = False
+
+
+class ToolInvocation(BaseModel):
+    name: str
+    operation: str | None = None
+    target: str | None = None
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+class SecurityContext(BaseModel):
+    policy_decision: PolicyDecision = PolicyDecision.MONITOR
+    risk_score: float = 0
+    risk_level: RiskLevel = RiskLevel.LOW
+    detections: list[str] = Field(default_factory=list)
+    approval_id: str | None = None
+
+
+class AIEvent(BaseModel):
+    event_id: UUID = Field(default_factory=uuid4)
+    event_type: EventType
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    actor: Actor = Field(default_factory=Actor)
+    ai: AIContext = Field(default_factory=AIContext)
+    data: DataContext = Field(default_factory=DataContext)
+    tools: list[ToolInvocation] = Field(default_factory=list)
+    input: dict[str, Any] = Field(default_factory=dict)
+    output: dict[str, Any] = Field(default_factory=dict)
+    security: SecurityContext = Field(default_factory=SecurityContext)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class AIAsset(BaseModel):
+    asset_id: UUID = Field(default_factory=uuid4)
+    kind: AssetKind
+    name: str
+    provider: str | None = None
+    deployment_type: DeploymentType = DeploymentType.UNKNOWN
+    owner: str | None = None
+    environment: str | None = None
+    data_classifications: list[str] = Field(default_factory=list)
+    identities: list[str] = Field(default_factory=list)
+    integrations: list[str] = Field(default_factory=list)
+    internet_exposed: bool = False
+    approved: bool = False
+    attributes: dict[str, Any] = Field(default_factory=dict)
+
+
+class RiskFactors(BaseModel):
+    impact: int = Field(ge=1, le=5)
+    likelihood: int = Field(ge=1, le=5)
+    data_sensitivity: float = Field(default=1.0, ge=0.1)
+    privilege: float = Field(default=1.0, ge=0.1)
+    autonomy: float = Field(default=1.0, ge=0.1)
+    exposure: float = Field(default=1.0, ge=0.1)
+    reachability: float = Field(default=1.0, ge=0.1)
+    control_effectiveness: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
+class RiskResult(BaseModel):
+    base_risk: float
+    contextual_risk: float
+    residual_risk: float
+    normalized_score: float
+    level: RiskLevel
