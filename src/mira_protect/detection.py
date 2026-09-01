@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from typing import Callable
 
-from .schemas import AIEvent, DetectionFinding, RiskLevel, ThreatProfile
+from .schemas import AIEvent, DetectionFinding, EventType, RiskLevel, ThreatProfile
 
 
 @dataclass(frozen=True)
@@ -22,9 +22,8 @@ class Detector:
 class DetectionEngine:
     """Vendor-neutral detections for observable AI security behaviors.
 
-    These prototype rules intentionally evaluate normalized telemetry rather than
-    provider-specific logs so additional collectors can be added without changing
-    detection logic.
+    Rules evaluate normalized telemetry rather than provider-specific logs so new
+    collectors can be added without rewriting detection logic.
     """
 
     PROMPT_INJECTION_MARKERS = (
@@ -35,6 +34,15 @@ class DetectionEngine:
         "override all",
         "bypass all",
     )
+
+    PROVIDER_RELEVANT_EVENTS = {
+        EventType.INTERACTION,
+        EventType.TOOL_CALL,
+        EventType.MODEL_CALL,
+        EventType.DATA_ACCESS,
+        EventType.ACTION,
+        EventType.ENDPOINT_PROCESS,
+    }
 
     def __init__(self, detectors: list[Detector] | None = None) -> None:
         self.detectors = detectors or self.default_detectors()
@@ -140,7 +148,9 @@ class DetectionEngine:
                 description="AI activity was observed without a known provider identity.",
                 profile=ThreatProfile.INTERNAL_GENERAL,
                 severity=RiskLevel.MEDIUM,
-                predicate=lambda e: not bool(e.ai.provider),
+                predicate=lambda e: (
+                    e.event_type in cls.PROVIDER_RELEVANT_EVENTS and not bool(e.ai.provider)
+                ),
                 recommended_actions=[
                     "Identify the application, model runtime, endpoint, and owner.",
                     "Register the system in the AI asset inventory.",
