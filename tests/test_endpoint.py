@@ -93,7 +93,7 @@ def test_endpoint_monitor_mode_never_requests_termination() -> None:
     assert body["effective_action"] == "observe"
 
 
-def test_endpoint_heartbeat_registers_managed_device() -> None:
+def test_endpoint_heartbeat_registers_managed_device_without_shadow_ai_finding() -> None:
     response = client.post(
         "/api/v1/endpoint/heartbeat",
         json={
@@ -114,4 +114,69 @@ def test_endpoint_heartbeat_registers_managed_device() -> None:
 
     summary = client.get("/api/v1/dashboard/summary").json()
     assert summary["assets"] == 1
+    assert summary["managed_devices"] == 1
     assert summary["events"] == 1
+    assert summary["findings"] == 0
+
+
+def test_endpoint_enforcement_confirmation_is_persisted() -> None:
+    evaluation = client.post(
+        "/api/v1/endpoint/process/evaluate",
+        json={
+            "device_id": "linux-test-01",
+            "hostname": "linux-test-01",
+            "username": "tester",
+            "pid": 5001,
+            "process_name": "python",
+            "command_line": ["python", "synthetic-target", TEST_BLOCK_MARKER],
+            "mode": "enforce",
+            "matched_local_rules": ["local:test-block"],
+        },
+    )
+    assert evaluation.status_code == 200
+    decision = evaluation.json()
+
+    report = client.post(
+        "/api/v1/endpoint/enforcement",
+        json={
+            "device_id": "linux-test-01",
+            "hostname": "linux-test-01",
+            "username": "tester",
+            "pid": 5001,
+            "process_name": "python",
+            "decision_event_id": decision["event_id"],
+            "action": "terminate",
+            "result": "succeeded",
+            "mode": "enforce",
+            "agent_version": "0.2.0",
+        },
+    )
+    assert report.status_code == 200
+    event = report.json()
+    assert event["event_type"] == "endpoint.enforcement"
+    assert event["parent_event_id"] == decision["event_id"]
+    assert event["metadata"]["result"] == "succeeded"
+
+    summary = client.get("/api/v1/dashboard/summary").json()
+    assert summary["enforcement_actions"] == 1
+    assert summary["enforcement_failures"] == 0
+
+
+def test_endpoint_token_is_enforced_when_configured(monkeypatch) -> None:
+    monkeypatch.setenv("MIRA_ENDPOINT_TOKEN", "test-secret")
+    payload = {
+        "device_id": "auth-test",
+        "hostname": "auth-test",
+        "mode": "monitor",
+        "platform": "Linux",
+    }
+
+    unauthorized = client.post("/api/v1/endpoint/heartbeat", json=payload)
+    assert unauthorized.status_code == 401
+
+    authorized = client.post(
+        "/api/v1/endpoint/heartbeat",
+        json=payload,
+        headers={"Authorization": "Bearer test-secret"},
+    )
+    assert authorized.status_code == 200
