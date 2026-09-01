@@ -21,6 +21,7 @@ from .schemas import (
     DeploymentType,
     DetectionFinding,
     EndpointDecision,
+    EndpointEnforcementReport,
     EndpointHeartbeat,
     EndpointProcessObservation,
     EnforcementMode,
@@ -47,9 +48,10 @@ repository = Repository()
 def _require_endpoint_token(authorization: str | None) -> None:
     """Require a shared endpoint token when MIRA_ENDPOINT_TOKEN is configured.
 
-    Authentication is optional for local labs so the prototype remains easy to run.
-    Enterprise tests should set MIRA_ENDPOINT_TOKEN and deploy the same value to the
-    managed endpoint through MIRA_AGENT_TOKEN.
+    Authentication is optional for isolated local labs. Shared enterprise development
+    environments should configure MIRA_ENDPOINT_TOKEN and deploy the same value to a
+    managed endpoint through MIRA_AGENT_TOKEN. Per-device enrollment replaces this
+    bootstrap model in a later milestone.
     """
 
     expected = os.getenv("MIRA_ENDPOINT_TOKEN")
@@ -157,8 +159,10 @@ def dashboard_summary() -> DashboardSummary:
     assets = repository.list_assets()
     events = repository.list_events(limit=2000)
     findings = repository.list_findings(limit=2000)
+    enforcement_events = [event for event in events if event.event_type == EventType.ENDPOINT_ENFORCEMENT]
     return DashboardSummary(
         assets=len(assets),
+        managed_devices=sum(1 for asset in assets if asset.kind == AssetKind.DEVICE),
         events=len(events),
         findings=len(findings),
         blocked_events=sum(
@@ -168,6 +172,12 @@ def dashboard_summary() -> DashboardSummary:
             1
             for event in events
             if event.security.policy_decision == PolicyDecision.REQUIRE_APPROVAL
+        ),
+        enforcement_actions=sum(
+            1 for event in enforcement_events if event.metadata.get("result") == "succeeded"
+        ),
+        enforcement_failures=sum(
+            1 for event in enforcement_events if event.metadata.get("result") == "failed"
         ),
         critical_findings=sum(1 for finding in findings if finding.severity == RiskLevel.CRITICAL),
         high_findings=sum(1 for finding in findings if finding.severity == RiskLevel.HIGH),
@@ -292,3 +302,41 @@ def evaluate_endpoint_process(
         event_id=event.event_id,
         message=message,
     )
+
+
+@app.post("/api/v1/endpoint/enforcement", response_model=AIEvent)
+def endpoint_enforcement(
+    report: EndpointEnforcementReport,
+    authorization: str | None = Header(default=None),
+) -> AIEvent:
+    """Persist endpoint confirmation that a preventative action was attempted."""
+
+    _require_endpoint_token(authorization)
+    event = AIEvent(
+        event_type=EventType.ENDPOINT_ENFORCEMENT,
+        timestamp=report.timestamp,
+        parent_event_id=report.decision_event_id,
+        trace_id=str(report.decision_event_id),
+        actor=Actor(
+            user_id=report.username,
+            device_id=report.device_id,
+            identity=report.username,
+        ),
+        metadata={
+            "hostname": report.hostname,
+            "pid": report.pid,
+            "process_name": report.process_name,
+            "decision_event_id": str(report.decision_event_id),
+            "action": report.action,
+            "result": report.result.value,
+            "mode": report.mode.value,
+            "agent_version": report.agent_version,
+            "reason": report.reason,
+            "error": report.error,
+        },
+    )
+    # An enforcement acknowledgement describes the result of an already-evaluated
+    # decision; re-running it through policy would create a second policy decision.
+    event.security.policy_decision = PolicyDecision.BLOCK
+    repository.save_event(event)
+    return event
