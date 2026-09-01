@@ -1,6 +1,6 @@
 [project]
 name = "mira-protect"
-version = "0.1.0"
+version = "0.2.0"
 description = "Vendor-neutral enterprise AI security control plane"
 requires-python = ">=3.12"
 dependencies = [
@@ -13,6 +13,7 @@ dependencies = [
   "redis>=5.0,<6",
   "httpx>=0.27,<1",
   "structlog>=24.4,<25",
+  "psutil>=6.0,<7",
 ]
 
 [project.optional-dependencies]
@@ -22,8 +23,11 @@ dev = [
   "ruff>=0.6,<1",
 ]
 
+[project.scripts]
+mira-protect-agent = "mira_protect.endpoint_agent:main"
+
 [tool.pytest.ini_options]
-pythonpath = ["."]
+pythonpath = [".", "src"]
 testpaths = ["tests"]
 
 [tool.ruff]
