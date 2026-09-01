@@ -43,6 +43,9 @@ class EventType(str, Enum):
     POLICY_DECISION = "ai.policy_decision"
     DETECTION = "ai.detection"
     ASSET_DISCOVERED = "ai.asset_discovered"
+    ENDPOINT_PROCESS = "endpoint.process"
+    ENDPOINT_ENFORCEMENT = "endpoint.enforcement"
+    ENDPOINT_HEARTBEAT = "endpoint.heartbeat"
 
 
 class PolicyDecision(str, Enum):
@@ -50,6 +53,12 @@ class PolicyDecision(str, Enum):
     BLOCK = "block"
     REQUIRE_APPROVAL = "require_approval"
     MONITOR = "monitor"
+
+
+class EnforcementMode(str, Enum):
+    MONITOR = "monitor"
+    GUARD = "guard"
+    ENFORCE = "enforce"
 
 
 class RiskLevel(str, Enum):
@@ -198,3 +207,49 @@ class RiskResult(BaseModel):
     residual_risk: float
     normalized_score: float
     level: RiskLevel
+
+
+class EndpointProcessObservation(BaseModel):
+    """Process telemetry submitted by a managed endpoint agent.
+
+    Command-line data is included because AI CLI tools are frequently wrappers around
+    Python, Node, PowerShell, or shell processes and cannot be reliably identified by
+    executable name alone.
+    """
+
+    device_id: str
+    hostname: str
+    username: str | None = None
+    pid: int = Field(ge=0)
+    parent_pid: int | None = Field(default=None, ge=0)
+    process_name: str
+    executable: str | None = None
+    command_line: list[str] = Field(default_factory=list)
+    executable_sha256: str | None = None
+    started_at: datetime | None = None
+    observed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    agent_version: str = "0.2.0"
+    mode: EnforcementMode = EnforcementMode.MONITOR
+    matched_local_rules: list[str] = Field(default_factory=list)
+    attributes: dict[str, Any] = Field(default_factory=dict)
+
+
+class EndpointDecision(BaseModel):
+    decision: PolicyDecision
+    effective_action: str
+    matched_rules: list[str] = Field(default_factory=list)
+    finding_ids: list[UUID] = Field(default_factory=list)
+    event_id: UUID
+    message: str | None = None
+
+
+class EndpointHeartbeat(BaseModel):
+    device_id: str
+    hostname: str
+    username: str | None = None
+    agent_version: str = "0.2.0"
+    mode: EnforcementMode = EnforcementMode.MONITOR
+    platform: str
+    platform_version: str | None = None
+    ip_addresses: list[str] = Field(default_factory=list)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
