@@ -59,6 +59,19 @@ class RiskLevel(str, Enum):
     CRITICAL = "critical"
 
 
+class ThreatProfile(str, Enum):
+    EXTERNAL = "profile_1_external"
+    INTERNAL_GENERAL = "profile_2a_internal"
+    ENTERPRISE_ASSISTANT = "profile_2b_enterprise_assistant"
+    AGENTIC = "profile_2c_agentic"
+
+
+class FindingStatus(str, Enum):
+    OPEN = "open"
+    ACKNOWLEDGED = "acknowledged"
+    RESOLVED = "resolved"
+
+
 class Actor(BaseModel):
     user_id: str | None = None
     device_id: str | None = None
@@ -101,6 +114,8 @@ class AIEvent(BaseModel):
     event_id: UUID = Field(default_factory=uuid4)
     event_type: EventType
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    trace_id: str | None = None
+    parent_event_id: UUID | None = None
     actor: Actor = Field(default_factory=Actor)
     ai: AIContext = Field(default_factory=AIContext)
     data: DataContext = Field(default_factory=DataContext)
@@ -124,17 +139,56 @@ class AIAsset(BaseModel):
     integrations: list[str] = Field(default_factory=list)
     internet_exposed: bool = False
     approved: bool = False
+    first_seen: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_seen: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     attributes: dict[str, Any] = Field(default_factory=dict)
+
+
+class DetectionFinding(BaseModel):
+    finding_id: UUID = Field(default_factory=uuid4)
+    event_id: UUID
+    detector_id: str
+    title: str
+    description: str
+    profile: ThreatProfile
+    severity: RiskLevel
+    status: FindingStatus = FindingStatus.OPEN
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    recommended_actions: list[str] = Field(default_factory=list)
+    framework_refs: dict[str, list[str]] = Field(default_factory=dict)
+
+
+class ThreatCatalogItem(BaseModel):
+    threat_id: str
+    profile: ThreatProfile
+    category: str
+    name: str
+    description: str
+    sample_signals: list[str] = Field(default_factory=list)
+    mitigations: list[str] = Field(default_factory=list)
+    framework_refs: dict[str, list[str]] = Field(default_factory=dict)
+
+
+class DashboardSummary(BaseModel):
+    assets: int = 0
+    events: int = 0
+    findings: int = 0
+    blocked_events: int = 0
+    approval_events: int = 0
+    critical_findings: int = 0
+    high_findings: int = 0
+    unapproved_assets: int = 0
 
 
 class RiskFactors(BaseModel):
     impact: int = Field(ge=1, le=5)
     likelihood: int = Field(ge=1, le=5)
-    data_sensitivity: float = Field(default=1.0, ge=0.1)
-    privilege: float = Field(default=1.0, ge=0.1)
-    autonomy: float = Field(default=1.0, ge=0.1)
-    exposure: float = Field(default=1.0, ge=0.1)
-    reachability: float = Field(default=1.0, ge=0.1)
+    data_sensitivity: float = Field(default=1.0, ge=0.1, le=5.0)
+    privilege: float = Field(default=1.0, ge=0.1, le=5.0)
+    autonomy: float = Field(default=1.0, ge=0.1, le=5.0)
+    exposure: float = Field(default=1.0, ge=0.1, le=5.0)
+    reachability: float = Field(default=1.0, ge=0.1, le=5.0)
     control_effectiveness: float = Field(default=1.0, ge=0.0, le=1.0)
 
 
