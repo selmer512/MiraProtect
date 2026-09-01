@@ -23,6 +23,15 @@ class PolicyEngine:
     EDR, MDM, browser, SWG, model gateway, and SaaS collectors.
     """
 
+    PROVIDER_RELEVANT_EVENTS = {
+        EventType.INTERACTION,
+        EventType.TOOL_CALL,
+        EventType.MODEL_CALL,
+        EventType.DATA_ACCESS,
+        EventType.ACTION,
+        EventType.ENDPOINT_PROCESS,
+    }
+
     def __init__(self, rules: list[PolicyRule] | None = None) -> None:
         self.rules = rules or self.default_rules()
 
@@ -44,8 +53,8 @@ class PolicyEngine:
 
         return decision, matched
 
-    @staticmethod
-    def default_rules() -> list[PolicyRule]:
+    @classmethod
+    def default_rules(cls) -> list[PolicyRule]:
         deny_processes = {
             value.strip().lower()
             for value in os.getenv("MIRA_ENDPOINT_DENY_PROCESSES", "").split(",")
@@ -92,7 +101,7 @@ class PolicyEngine:
                 rule_id="unknown-ai-provider-monitor",
                 description="Monitor use of AI systems without a known provider.",
                 predicate=lambda e: (
-                    e.event_type != EventType.ENDPOINT_HEARTBEAT and not bool(e.ai.provider)
+                    e.event_type in cls.PROVIDER_RELEVANT_EVENTS and not bool(e.ai.provider)
                 ),
                 decision=PolicyDecision.MONITOR,
             ),
