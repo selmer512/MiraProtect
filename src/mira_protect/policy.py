@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Callable
 
-from .schemas import AIEvent, PolicyDecision
+from .schemas import AIEvent, EventType, PolicyDecision
 
 
 @dataclass(frozen=True)
@@ -15,6 +16,13 @@ class PolicyRule:
 
 
 class PolicyEngine:
+    """Deterministic policy evaluation over normalized Mira Protect events.
+
+    The engine is intentionally provider-neutral. Endpoint enforcement rules consume
+    normalized process metadata so the same control plane can later accept events from
+    EDR, MDM, browser, SWG, model gateway, and SaaS collectors.
+    """
+
     def __init__(self, rules: list[PolicyRule] | None = None) -> None:
         self.rules = rules or self.default_rules()
 
@@ -38,6 +46,12 @@ class PolicyEngine:
 
     @staticmethod
     def default_rules() -> list[PolicyRule]:
+        deny_processes = {
+            value.strip().lower()
+            for value in os.getenv("MIRA_ENDPOINT_DENY_PROCESSES", "").split(",")
+            if value.strip()
+        }
+
         return [
             PolicyRule(
                 rule_id="protect-restricted-data-external-ai",
@@ -52,15 +66,34 @@ class PolicyEngine:
                 rule_id="production-tool-human-approval",
                 description="Require approval for AI tool actions targeting production.",
                 predicate=lambda e: any(
-                    (tool.target or "").lower().startswith("production")
-                    for tool in e.tools
+                    (tool.target or "").lower().startswith("production") for tool in e.tools
                 ),
                 decision=PolicyDecision.REQUIRE_APPROVAL,
             ),
             PolicyRule(
+                rule_id="endpoint-synthetic-protection-test",
+                description="Block the harmless Mira Protect endpoint test marker.",
+                predicate=lambda e: (
+                    e.event_type == EventType.ENDPOINT_PROCESS
+                    and "local:test-block" in e.metadata.get("matched_local_rules", [])
+                ),
+                decision=PolicyDecision.BLOCK,
+            ),
+            PolicyRule(
+                rule_id="endpoint-denied-ai-process",
+                description="Block centrally denied AI process names on managed endpoints.",
+                predicate=lambda e: (
+                    e.event_type == EventType.ENDPOINT_PROCESS
+                    and str(e.metadata.get("process_name", "")).lower() in deny_processes
+                ),
+                decision=PolicyDecision.BLOCK,
+            ),
+            PolicyRule(
                 rule_id="unknown-ai-provider-monitor",
                 description="Monitor use of AI systems without a known provider.",
-                predicate=lambda e: not bool(e.ai.provider),
+                predicate=lambda e: (
+                    e.event_type != EventType.ENDPOINT_HEARTBEAT and not bool(e.ai.provider)
+                ),
                 decision=PolicyDecision.MONITOR,
             ),
         ]
