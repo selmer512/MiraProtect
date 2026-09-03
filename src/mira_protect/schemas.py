@@ -67,6 +67,13 @@ class EnforcementResult(str, Enum):
     SUPPRESSED = "suppressed"
 
 
+class EndpointHealth(str, Enum):
+    ONLINE = "online"
+    STALE = "stale"
+    OFFLINE = "offline"
+    UNKNOWN = "unknown"
+
+
 class RiskLevel(str, Enum):
     LOW = "low"
     MEDIUM = "medium"
@@ -187,7 +194,11 @@ class ThreatCatalogItem(BaseModel):
 
 class DashboardSummary(BaseModel):
     assets: int = 0
+    ai_applications: int = 0
     managed_devices: int = 0
+    online_devices: int = 0
+    stale_devices: int = 0
+    offline_devices: int = 0
     events: int = 0
     findings: int = 0
     blocked_events: int = 0
@@ -197,6 +208,7 @@ class DashboardSummary(BaseModel):
     critical_findings: int = 0
     high_findings: int = 0
     unapproved_assets: int = 0
+    policy_version: str | None = None
 
 
 class RiskFactors(BaseModel):
@@ -218,13 +230,15 @@ class RiskResult(BaseModel):
     level: RiskLevel
 
 
-class EndpointProcessObservation(BaseModel):
-    """Process telemetry submitted by a managed endpoint agent.
+class EndpointParentProcess(BaseModel):
+    pid: int = Field(ge=0)
+    process_name: str
+    executable: str | None = None
+    command_line: list[str] = Field(default_factory=list)
 
-    Command-line data is included because AI CLI tools are frequently wrappers around
-    Python, Node, PowerShell, or shell processes and cannot be reliably identified by
-    executable name alone.
-    """
+
+class EndpointProcessObservation(BaseModel):
+    """Process telemetry submitted by a managed endpoint agent."""
 
     device_id: str
     hostname: str
@@ -235,11 +249,13 @@ class EndpointProcessObservation(BaseModel):
     executable: str | None = None
     command_line: list[str] = Field(default_factory=list)
     executable_sha256: str | None = None
+    parent_chain: list[EndpointParentProcess] = Field(default_factory=list)
     started_at: datetime | None = None
     observed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    agent_version: str = "0.2.0"
+    agent_version: str = "0.3.0"
     mode: EnforcementMode = EnforcementMode.MONITOR
     matched_local_rules: list[str] = Field(default_factory=list)
+    policy_version: str | None = None
     attributes: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -249,6 +265,9 @@ class EndpointDecision(BaseModel):
     matched_rules: list[str] = Field(default_factory=list)
     finding_ids: list[UUID] = Field(default_factory=list)
     event_id: UUID
+    policy_version: str | None = None
+    reason_codes: list[str] = Field(default_factory=list)
+    evidence: dict[str, Any] = Field(default_factory=dict)
     message: str | None = None
 
 
@@ -256,11 +275,13 @@ class EndpointHeartbeat(BaseModel):
     device_id: str
     hostname: str
     username: str | None = None
-    agent_version: str = "0.2.0"
+    agent_version: str = "0.3.0"
     mode: EnforcementMode = EnforcementMode.MONITOR
     platform: str
     platform_version: str | None = None
     ip_addresses: list[str] = Field(default_factory=list)
+    policy_version: str | None = None
+    queue_depth: int = Field(default=0, ge=0)
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -276,7 +297,36 @@ class EndpointEnforcementReport(BaseModel):
     action: str
     result: EnforcementResult
     mode: EnforcementMode
-    agent_version: str = "0.2.0"
+    agent_version: str = "0.3.0"
+    policy_version: str | None = None
     reason: str | None = None
     error: str | None = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class EndpointPolicyBundle(BaseModel):
+    version: str
+    issued_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    allow_processes: list[str] = Field(default_factory=list)
+    deny_processes: list[str] = Field(default_factory=list)
+    approved_providers: list[str] = Field(default_factory=list)
+    test_controls_enabled: bool = True
+    offline_fail_closed_allowed: bool = False
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class EndpointDeviceView(BaseModel):
+    device_id: str
+    hostname: str
+    username: str | None = None
+    health: EndpointHealth = EndpointHealth.UNKNOWN
+    last_heartbeat: datetime | None = None
+    seconds_since_heartbeat: float | None = None
+    agent_version: str | None = None
+    mode: EnforcementMode = EnforcementMode.MONITOR
+    platform: str | None = None
+    platform_version: str | None = None
+    policy_version: str | None = None
+    current_policy_version: str | None = None
+    queue_depth: int = 0
+    ip_addresses: list[str] = Field(default_factory=list)
