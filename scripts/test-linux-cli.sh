@@ -76,10 +76,10 @@ if [[ "${MIRA_SKIP_VALIDATION:-0}" != "1" ]]; then
 fi
 
 mkdir -p "$TEST_ROOT"
-rm -f "$TEST_ROOT/mira.db" "$TEST_ROOT/server.log" "$TEST_ROOT/agent.log" "$TEST_ROOT/target.log"
+rm -f "$TEST_ROOT/mira.db" "$TEST_ROOT/server.log" "$TEST_ROOT/agent.log" \
+  "$TEST_ROOT/target.log" "$TEST_ROOT/telemetry-queue.jsonl"
 
 ensure_venv
-
 # shellcheck disable=SC1091
 source "$VENV_DIR/bin/activate"
 
@@ -98,6 +98,10 @@ export MIRA_POLL_SECONDS="0.35"
 export MIRA_HEARTBEAT_SECONDS="1"
 export MIRA_REQUEST_TIMEOUT_SECONDS="2"
 export MIRA_FAIL_CLOSED="false"
+export MIRA_OFFLINE_FAIL_CLOSED_ALLOWED="false"
+export MIRA_ENABLE_TEST_CONTROLS="true"
+export MIRA_POLICY_VERSION="synthetic-linux-test"
+export MIRA_QUEUE_FILE="$TEST_ROOT/telemetry-queue.jsonl"
 
 info "Starting control plane on $CONTROL_PLANE_URL"
 mira-protect-server --host 127.0.0.1 --port "$PORT" --log-level warning >"$TEST_ROOT/server.log" 2>&1 &
