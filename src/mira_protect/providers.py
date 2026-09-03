@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
 from .schemas import DeploymentType
 
@@ -29,14 +28,14 @@ SIGNATURES: tuple[AIProductSignature, ...] = (
         product="Claude Code",
         deployment_type=DeploymentType.VENDOR_UI,
         process_names=("claude", "claude.exe"),
-        command_markers=("@anthropic-ai/claude-code", "/claude", "\\claude"),
+        command_markers=("@anthropic-ai/claude-code",),
     ),
     AIProductSignature(
         provider="openai",
         product="Codex CLI",
         deployment_type=DeploymentType.VENDOR_UI,
         process_names=("codex", "codex.exe"),
-        command_markers=("@openai/codex", "openai codex", "/codex", "\\codex"),
+        command_markers=("@openai/codex", "openai codex"),
     ),
     AIProductSignature(
         provider="github",
@@ -50,7 +49,7 @@ SIGNATURES: tuple[AIProductSignature, ...] = (
         product="Gemini CLI",
         deployment_type=DeploymentType.VENDOR_UI,
         process_names=("gemini", "gemini.exe"),
-        command_markers=("@google/gemini-cli", "/gemini", "\\gemini"),
+        command_markers=("@google/gemini-cli",),
     ),
     AIProductSignature(
         provider="local",
@@ -78,20 +77,21 @@ SIGNATURES: tuple[AIProductSignature, ...] = (
         product="Aider",
         deployment_type=DeploymentType.VENDOR_UI,
         process_names=("aider", "aider.exe"),
-        command_markers=("aider-chat", "/aider", "\\aider"),
+        command_markers=("aider-chat",),
     ),
     AIProductSignature(
         provider="community",
         product="OpenCode",
         deployment_type=DeploymentType.VENDOR_UI,
         process_names=("opencode", "opencode.exe"),
-        command_markers=("/opencode", "\\opencode"),
+        command_markers=("opencode-ai",),
     ),
 )
 
 
 def _normalized_process_name(value: str) -> str:
-    return Path(value or "").name.lower()
+    normalized = (value or "").replace("\\", "/").rstrip("/")
+    return normalized.rsplit("/", 1)[-1].lower()
 
 
 def classify_ai_process(process_name: str, command_line: list[str]) -> AIProductMatch | None:
@@ -107,20 +107,30 @@ def classify_ai_process(process_name: str, command_line: list[str]) -> AIProduct
 
     for signature in SIGNATURES:
         names = {name.lower() for name in signature.process_names}
-        if normalized_name in names or names.intersection(argument_basenames):
+        if normalized_name in names:
             return AIProductMatch(
                 provider=signature.provider,
                 product=signature.product,
                 deployment_type=signature.deployment_type,
                 signature=f"process:{normalized_name}",
             )
+
+        argument_matches = sorted(names.intersection(argument_basenames))
+        if argument_matches:
+            return AIProductMatch(
+                provider=signature.provider,
+                product=signature.product,
+                deployment_type=signature.deployment_type,
+                signature=f"command-executable:{argument_matches[0]}",
+            )
+
         for marker in signature.command_markers:
             if marker.lower() in command:
                 return AIProductMatch(
                     provider=signature.provider,
                     product=signature.product,
                     deployment_type=signature.deployment_type,
-                    signature=f"command:{marker}",
+                    signature=f"command-marker:{marker}",
                 )
     return None
 
