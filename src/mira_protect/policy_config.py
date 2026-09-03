@@ -36,7 +36,7 @@ def get_endpoint_policy_bundle() -> EndpointPolicyBundle:
         allow_processes=_csv_env("MIRA_ENDPOINT_ALLOW_PROCESSES"),
         deny_processes=_csv_env("MIRA_ENDPOINT_DENY_PROCESSES"),
         approved_providers=_csv_env("MIRA_APPROVED_AI_PROVIDERS"),
-        test_controls_enabled=_bool_env("MIRA_ENABLE_TEST_CONTROLS", True),
+        test_controls_enabled=_bool_env("MIRA_ENABLE_TEST_CONTROLS", False),
         offline_fail_closed_allowed=_bool_env("MIRA_OFFLINE_FAIL_CLOSED_ALLOWED", False),
         metadata={
             "source": "environment",
