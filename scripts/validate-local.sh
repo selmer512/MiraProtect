@@ -45,6 +45,14 @@ python -m pip install -e "$ROOT_DIR[dev]" >/dev/null
 
 export MIRA_DATABASE_URL="sqlite+pysqlite:///:memory:"
 
+printf '\n== Python compile ==\n'
+python -m compileall -q "$ROOT_DIR/src" "$ROOT_DIR/tests"
+
+printf '\n== Bash syntax ==\n'
+bash -n "$ROOT_DIR/scripts/validate-local.sh"
+bash -n "$ROOT_DIR/scripts/test-linux-cli.sh"
+bash -n "$ROOT_DIR/scripts/test-linux-ai-monitor-guard.sh"
+
 printf '\n== Ruff ==\n'
 ruff check --config "$ROOT_DIR/pyproject.toml" "$ROOT_DIR/src" "$ROOT_DIR/tests"
 
@@ -53,11 +61,13 @@ pytest -q "$ROOT_DIR/tests"
 
 printf '\n== Import smoke test ==\n'
 python - <<'PY'
+from mira_protect import __version__
 from mira_protect.app import app
 from mira_protect.cli import build_parser
 from mira_protect.endpoint_agent import AgentConfig
 
 assert app.title == "Mira Protect"
+assert app.version == __version__
 assert build_parser().prog == "mira-protect"
 assert AgentConfig().mode == "monitor"
 print(f"{app.title} {app.version}: import smoke test passed")
