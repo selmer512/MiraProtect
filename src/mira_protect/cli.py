@@ -228,7 +228,7 @@ def main() -> None:
         print(f"Control-plane request failed: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
     except KeyboardInterrupt:
-        raise SystemExit(130)
+        raise SystemExit(130) from None
     raise SystemExit(result)
 
 
