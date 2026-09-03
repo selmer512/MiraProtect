@@ -10,15 +10,16 @@ from typing import Any
 
 import httpx
 
-from .endpoint_agent import AgentConfig, EndpointAgent, TEST_BLOCK_MARKER
+from .endpoint_agent import TEST_BLOCK_MARKER, AgentConfig, EndpointAgent
 
+CLI_VERSION = "0.3.0"
 DEFAULT_URL = "http://127.0.0.1:8080"
 
 
 def _client(args: argparse.Namespace) -> httpx.Client:
     base_url = str(args.url or os.getenv("MIRA_CONTROL_PLANE_URL", DEFAULT_URL)).rstrip("/")
     token = args.token or os.getenv("MIRA_AGENT_TOKEN") or os.getenv("MIRA_ENDPOINT_TOKEN")
-    headers = {"User-Agent": "MiraProtectCLI/0.2.0"}
+    headers = {"User-Agent": f"MiraProtectCLI/{CLI_VERSION}"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
     return httpx.Client(base_url=base_url, headers=headers, timeout=args.timeout)
@@ -72,8 +73,30 @@ def _command_assets(args: argparse.Namespace) -> int:
     return 0
 
 
+def _command_inventory(args: argparse.Namespace) -> int:
+    _emit(_get(args, "/api/v1/ai-inventory"), args.json)
+    return 0
+
+
+def _command_devices(args: argparse.Namespace) -> int:
+    _emit(_get(args, "/api/v1/endpoint/devices"), args.json)
+    return 0
+
+
+def _command_policy(args: argparse.Namespace) -> int:
+    _emit(_get(args, "/api/v1/endpoint/policy"), args.json)
+    return 0
+
+
 def _command_events(args: argparse.Namespace) -> int:
-    _emit(_get(args, "/api/v1/events", {"limit": args.limit}), args.json)
+    values = _get(args, "/api/v1/events", {"limit": args.limit})
+    if args.phase:
+        values = [
+            value
+            for value in values
+            if value.get("metadata", {}).get("event_phase") == args.phase
+        ]
+    _emit(values, args.json)
     return 0
 
 
@@ -89,6 +112,7 @@ def _command_threats(args: argparse.Namespace) -> int:
 
 def _command_doctor(args: argparse.Namespace) -> int:
     report: dict[str, Any] = {
+        "cli_version": CLI_VERSION,
         "python": platform.python_version(),
         "platform": platform.platform(),
         "architecture": platform.machine(),
@@ -96,7 +120,9 @@ def _command_doctor(args: argparse.Namespace) -> int:
     }
     try:
         health = _get(args, "/health")
+        policy = _get(args, "/api/v1/endpoint/policy")
         report["health"] = health
+        report["policy_version"] = policy.get("version")
         report["ready"] = health.get("status") == "ok" and health.get("database") == "ok"
     except Exception as exc:
         report["ready"] = False
@@ -120,7 +146,15 @@ def _command_agent(args: argparse.Namespace) -> int:
     if args.once:
         try:
             count = agent.run_once()
-            _emit({"evaluated": count, "mode": config.mode, "device_id": config.device_id}, args.json)
+            _emit(
+                {
+                    "evaluated": count,
+                    "mode": config.mode,
+                    "device_id": config.device_id,
+                    "policy_version": agent.policy_version,
+                },
+                args.json,
+            )
         finally:
             agent.close()
         return 0
@@ -130,8 +164,6 @@ def _command_agent(args: argparse.Namespace) -> int:
 
 
 def _command_synthetic_target(args: argparse.Namespace) -> int:
-    # This is intentionally harmless. The marker exists only so the endpoint agent can
-    # exercise an end-to-end BLOCK -> terminate decision without targeting a real tool.
     if not args.mira_protect_test_block:
         print(
             "Synthetic target refused to run without the explicit test marker. "
@@ -176,10 +208,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     commands = {
         "health": ("Show control-plane health", _command_health),
-        "summary": ("Show dashboard summary", _command_summary),
-        "assets": ("List discovered/managed assets", _command_assets),
+        "summary": ("Show security posture summary", _command_summary),
+        "assets": ("List all discovered/managed assets", _command_assets),
+        "inventory": ("List discovered AI applications", _command_inventory),
+        "devices": ("List managed endpoint health", _command_devices),
+        "policy": ("Show the active endpoint policy bundle", _command_policy),
         "threats": ("List COMPASS-aligned threat catalog", _command_threats),
-        "doctor": ("Check whether this CLI can reach a ready control plane", _command_doctor),
+        "doctor": ("Check CLI, API, database, and policy readiness", _command_doctor),
     }
     for name, (help_text, handler) in commands.items():
         command = subparsers.add_parser(name, help=help_text)
@@ -187,6 +222,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     events = subparsers.add_parser("events", help="List normalized security events")
     events.add_argument("--limit", type=int, default=50)
+    events.add_argument(
+        "--phase",
+        choices=("discovery", "health", "enforcement"),
+        default=None,
+        help="Filter by Mira Protect event phase",
+    )
     events.set_defaults(handler=_command_events)
 
     findings = subparsers.add_parser("findings", help="List detection findings")
@@ -208,7 +249,7 @@ def build_parser() -> argparse.ArgumentParser:
         TEST_BLOCK_MARKER,
         dest="mira_protect_test_block",
         action="store_true",
-        help="Required safety marker that makes the target eligible for the synthetic block policy",
+        help="Required safety marker that makes the target eligible for synthetic blocking",
     )
     target.set_defaults(handler=_command_synthetic_target)
 
