@@ -46,7 +46,7 @@ python -m pip install -e "$ROOT_DIR[dev]" >/dev/null
 export MIRA_DATABASE_URL="sqlite+pysqlite:///:memory:"
 
 printf '\n== Ruff ==\n'
-ruff check "$ROOT_DIR/src" "$ROOT_DIR/tests"
+ruff check --config "$ROOT_DIR/pyproject.toml" "$ROOT_DIR/src" "$ROOT_DIR/tests"
 
 printf '\n== Pytest ==\n'
 pytest -q "$ROOT_DIR/tests"
