@@ -6,7 +6,7 @@ This is the first supported Mira Protect endpoint protection test path. It is de
 
 The test performs local lint/unit/import validation, starts a Mira Protect control plane, runs the endpoint agent in `enforce` mode, registers the Linux device, launches a harmless synthetic process containing the Mira Protect test marker, receives a central `BLOCK` decision, terminates that process, reports the enforcement result back to the control plane, persists the decision and enforcement evidence, and verifies the expected policy rule.
 
-The synthetic target does not perform a malicious action. Its command line includes `--mira-protect-test-block`, which exists only to exercise the protection path safely.
+The synthetic target does not perform a malicious action. Its command line includes `--mira-protect-test-block`, which exists only to exercise the protection path safely. Synthetic test controls are disabled by default in normal v0.3 deployments and are enabled explicitly by this test script.
 
 ## Requirements
 
@@ -21,28 +21,28 @@ Docker is not required for this first test. The test uses a temporary local SQLi
 
 ## Run the complete test
 
-From the repository root on branch `develop/initial-ai-security-platform`:
+From the repository root on branch `develop/real-ai-cli-observability`:
 
 ```bash
-bash scripts/test-linux-cli.sh
+PYTHON_BIN=python3.12 bash scripts/test-linux-cli.sh
 ```
 
 The script automatically runs `scripts/validate-local.sh` first. To run validation separately:
 
 ```bash
-bash scripts/validate-local.sh
+PYTHON_BIN=python3.12 bash scripts/validate-local.sh
 ```
 
 To skip that validation on a repeat protection run:
 
 ```bash
-MIRA_SKIP_VALIDATION=1 bash scripts/test-linux-cli.sh
+MIRA_SKIP_VALIDATION=1 PYTHON_BIN=python3.12 bash scripts/test-linux-cli.sh
 ```
 
 The protection test uses TCP port `18080` by default. Override it if required:
 
 ```bash
-MIRA_TEST_PORT=28080 bash scripts/test-linux-cli.sh
+MIRA_TEST_PORT=28080 PYTHON_BIN=python3.12 bash scripts/test-linux-cli.sh
 ```
 
 Successful output ends with:
@@ -57,6 +57,7 @@ The test writes its logs and SQLite database to `.mira-test/`:
 .mira-test/server.log
 .mira-test/agent.log
 .mira-test/target.log
+.mira-test/telemetry-queue.jsonl
 .mira-test/mira.db
 ```
 
@@ -81,7 +82,7 @@ The script fails unless all of the following occur:
 Create and activate the environment:
 
 ```bash
-python3 -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -e '.[dev]'
 ```
@@ -91,6 +92,8 @@ Start a local control plane in terminal 1:
 ```bash
 export MIRA_DATABASE_URL='sqlite+pysqlite:///./mira-protect-test.db'
 export MIRA_ENDPOINT_TOKEN='replace-this-test-token'
+export MIRA_ENABLE_TEST_CONTROLS='true'
+export MIRA_POLICY_VERSION='manual-synthetic-test'
 mira-protect-server --host 127.0.0.1 --port 8080
 ```
 
@@ -102,6 +105,7 @@ export MIRA_CONTROL_PLANE_URL='http://127.0.0.1:8080'
 export MIRA_AGENT_TOKEN='replace-this-test-token'
 mira-protect doctor
 mira-protect health
+mira-protect policy
 ```
 
 Start the endpoint agent in enforce mode:
@@ -126,6 +130,7 @@ Inspect the resulting control-plane data:
 
 ```bash
 mira-protect summary
+mira-protect devices
 mira-protect assets
 mira-protect events --limit 20
 mira-protect findings --limit 20
@@ -155,7 +160,7 @@ The endpoint agent has three modes:
 - `guard`: notify/record a preventative decision, but do not terminate.
 - `enforce`: apply supported blocking decisions, including process termination.
 
-The first automated Linux smoke test intentionally uses `enforce` only against the dedicated synthetic target. Do not populate real process deny lists until monitor/guard telemetry has been reviewed.
+The synthetic smoke test intentionally uses `enforce` only against the dedicated test target. Real AI tooling should be validated through `scripts/test-linux-ai-monitor-guard.sh` before any real process is considered for enforcement policy.
 
 ## Troubleshooting
 

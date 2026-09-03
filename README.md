@@ -6,11 +6,13 @@ The architecture is guided by the OWASP GenAI COMPASS Observe -> Orient -> Decid
 
 ## Current development branch
 
-`develop/initial-ai-security-platform`
+`develop/real-ai-cli-observability`
 
 ## Current milestone
 
-The project is at an **enterprise development alpha / endpoint protection test** stage. The first supported test target is a Linux development endpoint operated from the CLI. Windows endpoint packaging remains in the repository for later testing.
+Version `0.3.0` adds **real AI CLI discovery plus monitor/guard validation** on Linux. Mira Protect now distinguishes AI software discovery from security detection and from enforcement. Discovering a real AI tool does not automatically terminate it.
+
+The previously validated synthetic Linux endpoint protection test remains available for the controlled `BLOCK -> terminate -> confirm -> persist` path.
 
 ## Architecture
 
@@ -47,22 +49,27 @@ Endpoint / Browser / SaaS / Network / Identity / Cloud / AI telemetry
 - User, device, identity, provider, model, data, agent, and tool context
 - COMPASS-style threat catalog and initial detection content
 - Contextual AI risk engine
-- Deterministic policy engine with decision precedence
+- Deterministic policy engine with explicit allow/deny controls
 - Restricted/CUI data protection rule
 - Human-approval control for AI-mediated production actions
 - Unknown/unmanaged AI monitoring
-- Endpoint process discovery and command-line inspection
-- AI CLI/runtime discovery for tools such as Claude, Codex, Copilot, Cursor, Gemini, Ollama, LM Studio, Aider, and OpenCode
-- Endpoint executable hashing
-- Managed endpoint heartbeat and device inventory
+- Real AI CLI/runtime discovery and provider/product classification
+- Signatures for Claude Code, Codex CLI, GitHub Copilot CLI, Gemini CLI, Ollama, LM Studio, Cursor, Aider, and OpenCode
+- AI application inventory tied to endpoint/device identity
+- Executable SHA-256 caching
+- Parent-process lineage collection
+- Managed endpoint heartbeat and health status
+- Versioned endpoint policy distribution contract
+- Endpoint policy-version reporting
+- Bounded local telemetry queue for failed heartbeat/enforcement reports
+- Safer cached-policy offline behavior
 - `monitor`, `guard`, and `enforce` endpoint modes
-- Central endpoint deny policy
 - Safe synthetic endpoint block test
-- Process termination enforcement for supported block decisions
+- Process termination enforcement for supported explicit block decisions
 - SQLite local development persistence
 - PostgreSQL support for the containerized control plane
 - FastAPI control plane
-- CLI for health, inventory, events, findings, threats, and endpoint operation
+- CLI for health, AI inventory, devices, policy, events, findings, threats, and endpoint operation
 - Local validation harness independent of GitHub Actions
 - Windows installer/uninstaller prototype
 
@@ -70,32 +77,51 @@ Endpoint / Browser / SaaS / Network / Identity / Cloud / AI telemetry
 
 | Method | Endpoint | Purpose |
 |---|---|---|
-| GET | `/health` | Service/database health |
+| GET | `/health` | Service/database/policy health |
 | POST | `/api/v1/assets` | Register an AI-related asset |
-| GET | `/api/v1/assets` | List known AI assets |
+| GET | `/api/v1/assets` | List known assets |
+| GET | `/api/v1/ai-inventory` | List discovered AI applications |
 | POST | `/api/v1/events` | Ingest and evaluate normalized AI telemetry |
 | GET | `/api/v1/events` | List events |
 | GET | `/api/v1/findings` | List detection findings |
 | GET | `/api/v1/threats` | List COMPASS-aligned threat content |
-| GET | `/api/v1/dashboard/summary` | Return security summary counts |
+| GET | `/api/v1/dashboard/summary` | Return security posture counts |
 | POST | `/api/v1/risk/score` | Calculate contextual AI risk |
+| GET | `/api/v1/endpoint/policy` | Return the active endpoint policy bundle |
+| GET | `/api/v1/endpoint/devices` | Return managed endpoint health/status |
 | POST | `/api/v1/endpoint/heartbeat` | Register/update a managed endpoint |
-| POST | `/api/v1/endpoint/process/evaluate` | Evaluate an endpoint process and return enforcement action |
+| POST | `/api/v1/endpoint/process/evaluate` | Classify/evaluate endpoint process telemetry |
+| POST | `/api/v1/endpoint/enforcement` | Persist endpoint enforcement confirmation |
 
-## First test: Linux CLI protection
+## Linux validation paths
 
-Requirements: Linux, Bash, Python 3.12+, and Python `venv` support.
+### 1. Synthetic enforcement path
 
 ```bash
-git checkout develop/initial-ai-security-platform
-chmod +x scripts/validate-local.sh scripts/test-linux-cli.sh
-./scripts/validate-local.sh
-./scripts/test-linux-cli.sh
+git checkout develop/real-ai-cli-observability
+PYTHON_BIN=python3.12 bash scripts/test-linux-cli.sh
 ```
 
-The second script starts a local control plane and Linux endpoint agent, launches a harmless synthetic process carrying the dedicated Mira Protect test marker, verifies that the central policy returns `BLOCK`, verifies that the agent terminates the synthetic process in `enforce` mode, and confirms that the blocked event is persisted.
+This verifies the controlled synthetic terminate path without targeting a real AI application.
 
-Detailed instructions are in `docs/linux-cli-test.md`.
+### 2. Real AI CLI monitor/guard path
+
+```bash
+PYTHON_BIN=python3.12 bash scripts/test-linux-ai-monitor-guard.sh
+```
+
+The script searches for an installed `claude`, `codex`, `gemini`, `aider`, `ollama`, or `opencode` CLI. You can provide an explicit harmless command instead:
+
+```bash
+MIRA_AI_TEST_TOOL=claude \
+MIRA_AI_TEST_COMMAND='claude --version' \
+PYTHON_BIN=python3.12 \
+bash scripts/test-linux-ai-monitor-guard.sh
+```
+
+Phase 1 validates real AI discovery in `monitor` mode. Phase 2 restarts in `guard` mode with an explicit central deny rule for the process discovered in phase 1 and verifies `BLOCK -> notify` with **no termination**.
+
+Detailed implementation and acceptance criteria are in `docs/real-ai-cli-milestone.md`.
 
 ## CLI quick reference
 
@@ -105,67 +131,39 @@ After `pip install -e '.[dev]'`:
 mira-protect doctor
 mira-protect health
 mira-protect summary
+mira-protect devices
+mira-protect inventory
+mira-protect policy
 mira-protect assets
 mira-protect events --limit 50
+mira-protect events --phase discovery
 mira-protect findings --limit 50
 mira-protect threats
 mira-protect agent --once --mode monitor
 ```
 
-Run the control plane directly:
-
-```bash
-mira-protect-server --host 127.0.0.1 --port 8080
-```
-
-Run the endpoint agent directly:
-
-```bash
-export MIRA_CONTROL_PLANE_URL=http://127.0.0.1:8080
-export MIRA_AGENT_MODE=monitor
-mira-protect-agent
-```
-
-## Containerized control plane
-
-```bash
-cp .env.example .env
-# Replace the example endpoint token before using a shared development environment.
-docker compose up --build
-```
-
-OpenAPI documentation is available at `http://localhost:8080/docs` when running locally.
-
 ## Endpoint operating modes
 
-- **monitor** — collect and evaluate activity without preventative endpoint action.
-- **guard** — surface preventative decisions and findings without terminating processes.
-- **enforce** — apply supported block decisions. The current prototype supports process termination.
+- **monitor** — discover, classify, evaluate, and record without preventative endpoint action.
+- **guard** — surface explicit blocking decisions and findings without terminating processes.
+- **enforce** — apply supported explicit block decisions. The current endpoint action is process termination.
 
-Enterprise rollout should progress from monitor -> guard -> enforce after telemetry and policy have been reviewed.
+Enterprise rollout should progress from monitor -> guard -> enforce only after the observed AI inventory and policy effects have been reviewed.
 
-## Core design principles
+## Policy configuration
 
-1. **Vendor neutral** — providers are adapters rather than architectural dependencies.
-2. **AI is part of the enterprise attack surface** — users, identities, devices, applications, data, agents, tools, APIs, and infrastructure must be correlated.
-3. **Trace actions end-to-end** — AI activity should remain attributable from the initiating human/workload through model/tool use to the resulting action.
-4. **Monitor, guard, and enforce** — the same normalized policy layer should support passive visibility and preventative controls.
-5. **Extensible threat content** — new attacks should be expressible as detections and policies instead of requiring architectural redesign.
-6. **Continuous COMPASS** — Observe, Orient, Decide, and Act should become an operational loop rather than a periodic spreadsheet exercise.
+The v0.3 policy source is environment-backed and versioned. Key settings are documented in `.env.example`:
 
-## Next commercial-development milestones
+```text
+MIRA_POLICY_VERSION
+MIRA_ENDPOINT_ALLOW_PROCESSES
+MIRA_ENDPOINT_DENY_PROCESSES
+MIRA_APPROVED_AI_PROVIDERS
+MIRA_ENABLE_TEST_CONTROLS
+MIRA_OFFLINE_FAIL_CLOSED_ALLOWED
+```
 
-- Per-device enrollment and stronger device identity
-- Signed/versioned endpoint policy bundles and local policy cache
-- TLS/mTLS deployment configuration
-- RBAC for administrative APIs
-- Database migrations
-- Linux service packaging and Windows managed packaging
-- Expanded endpoint/network/browser discovery
-- SIEM/SOAR and DLP integrations
-- AI security graph and execution lineage
-- Tamper resistance and controlled agent update mechanism
-- Expanded detection and response content across COMPASS Profiles 1, 2A, 2B, and 2C
+Allow entries take precedence when the same exact process is present in both allow and deny lists.
 
 ## Repository layout
 
@@ -175,23 +173,26 @@ src/mira_protect/
   cli.py             operator/development CLI
   server.py          local control-plane launcher
   schemas.py         normalized domain/event models
-  risk.py            AI risk engine
+  providers.py       AI product signature/classification registry
+  policy_config.py   versioned endpoint policy source
   policy.py          policy evaluation engine
   detection.py       normalized AI detections
   catalog.py         threat catalog
   collectors.py      collector SDK
   repository.py      persistence boundary
-  endpoint_agent.py  managed endpoint process sensor/enforcer
+  endpoint_agent.py  managed endpoint sensor/enforcer
 
 scripts/
   validate-local.sh
   test-linux-cli.sh
+  test-linux-ai-monitor-guard.sh
   install-windows-agent.ps1
   test-endpoint-protection.ps1
   uninstall-windows-agent.ps1
 
 docs/
   linux-cli-test.md
+  real-ai-cli-milestone.md
 ```
 
-GitHub is used as the source repository. Validation is designed to run locally or inside the enterprise/commercial development environment rather than depending on GitHub Actions.
+GitHub is used as the source repository. Validation runs locally or inside the enterprise/commercial development environment rather than depending on GitHub Actions.

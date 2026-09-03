@@ -20,11 +20,7 @@ class Detector:
 
 
 class DetectionEngine:
-    """Vendor-neutral detections for observable AI security behaviors.
-
-    Rules evaluate normalized telemetry rather than provider-specific logs so new
-    collectors can be added without rewriting detection logic.
-    """
+    """Vendor-neutral detections for observable AI security behaviors."""
 
     PROMPT_INJECTION_MARKERS = (
         "ignore all previous instructions",
@@ -171,5 +167,23 @@ class DetectionEngine:
                     "Apply maximum delegation and tool-call depth policies.",
                 ],
                 framework_refs={"OWASP_COMPASS": ["Profile 2C Multi-Agent", "Profile 2C Infrastructure"]},
+            ),
+            Detector(
+                detector_id="MP-AI-006",
+                title="Discovered AI software is not approved",
+                description="A known AI application was discovered on an endpoint but its provider is not in the approved provider registry.",
+                profile=ThreatProfile.INTERNAL_GENERAL,
+                severity=RiskLevel.MEDIUM,
+                predicate=lambda e: (
+                    e.event_type == EventType.ENDPOINT_PROCESS
+                    and bool(e.ai.provider)
+                    and not bool(e.metadata.get("provider_approved", False))
+                ),
+                recommended_actions=[
+                    "Confirm the business use case and responsible owner.",
+                    "Review data classifications and integrations before authorization.",
+                    "Add the provider to the approved registry only after governance review.",
+                ],
+                framework_refs={"OWASP_COMPASS": ["Profile 2A Shadow AI"]},
             ),
         ]
