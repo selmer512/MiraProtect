@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hmac
 import os
+from datetime import datetime, timezone
 from uuid import NAMESPACE_URL, uuid5
 
 from fastapi import FastAPI, Header, HTTPException, Query, status
@@ -9,6 +10,8 @@ from fastapi import FastAPI, Header, HTTPException, Query, status
 from .catalog import get_catalog
 from .detection import DetectionEngine
 from .policy import PolicyEngine
+from .policy_config import get_endpoint_policy_bundle
+from .providers import AIProductMatch, classify_ai_process
 from .repository import Repository
 from .risk import RiskEngine
 from .schemas import (
@@ -18,11 +21,13 @@ from .schemas import (
     Actor,
     AssetKind,
     DashboardSummary,
-    DeploymentType,
     DetectionFinding,
     EndpointDecision,
+    EndpointDeviceView,
     EndpointEnforcementReport,
+    EndpointHealth,
     EndpointHeartbeat,
+    EndpointPolicyBundle,
     EndpointProcessObservation,
     EnforcementMode,
     EventType,
@@ -33,27 +38,22 @@ from .schemas import (
     ThreatCatalogItem,
 )
 
+APP_VERSION = "0.3.0"
+
 app = FastAPI(
     title="Mira Protect",
-    version="0.2.0",
+    version=APP_VERSION,
     description="Vendor-neutral enterprise AI security control plane",
 )
 
 risk_engine = RiskEngine()
-policy_engine = PolicyEngine()
+policy_bundle = get_endpoint_policy_bundle()
+policy_engine = PolicyEngine(policy_bundle=policy_bundle)
 detection_engine = DetectionEngine()
 repository = Repository()
 
 
 def _require_endpoint_token(authorization: str | None) -> None:
-    """Require a shared endpoint token when MIRA_ENDPOINT_TOKEN is configured.
-
-    Authentication is optional for isolated local labs. Shared enterprise development
-    environments should configure MIRA_ENDPOINT_TOKEN and deploy the same value to a
-    managed endpoint through MIRA_AGENT_TOKEN. Per-device enrollment replaces this
-    bootstrap model in a later milestone.
-    """
-
     expected = os.getenv("MIRA_ENDPOINT_TOKEN")
     if not expected:
         return
@@ -67,12 +67,14 @@ def _require_endpoint_token(authorization: str | None) -> None:
         )
 
 
-def _process_event(event: AIEvent) -> tuple[AIEvent, list[DetectionFinding]]:
+def _process_event(
+    event: AIEvent,
+) -> tuple[AIEvent, list[DetectionFinding], list[str]]:
     findings = detection_engine.evaluate(event)
     decision, matched_rules = policy_engine.evaluate(event)
     event.security.policy_decision = decision
     event.security.detections = sorted(
-        set(event.security.detections + matched_rules + [f.detector_id for f in findings])
+        set(event.security.detections + matched_rules + [finding.detector_id for finding in findings])
     )
     if findings:
         severity_order = {
@@ -81,30 +83,117 @@ def _process_event(event: AIEvent) -> tuple[AIEvent, list[DetectionFinding]]:
             RiskLevel.HIGH: 3,
             RiskLevel.CRITICAL: 4,
         }
-        highest = max(findings, key=lambda finding: severity_order[finding.severity]).severity
-        event.security.risk_level = highest
+        event.security.risk_level = max(
+            findings,
+            key=lambda finding: severity_order[finding.severity],
+        ).severity
     repository.save_event(event)
     repository.save_findings(findings)
-    return event, findings
+    return event, findings, matched_rules
 
 
-def _infer_process_provider(process_name: str, command_line: list[str]) -> tuple[str | None, str]:
-    text = f"{process_name} {' '.join(command_line)}".lower()
-    mappings = [
-        ("claude", "anthropic", "Claude Code"),
-        ("codex", "openai", "Codex CLI"),
-        ("copilot", "github", "GitHub Copilot"),
-        ("gemini", "google", "Gemini CLI"),
-        ("ollama", "local", "Ollama"),
-        ("lmstudio", "local", "LM Studio"),
-        ("cursor", "cursor", "Cursor"),
-        ("aider", "community", "Aider"),
-        ("opencode", "community", "OpenCode"),
-    ]
-    for marker, provider, product in mappings:
-        if marker in text:
-            return provider, product
-    return None, process_name
+def _provider_is_approved(provider: str | None) -> bool:
+    if not provider:
+        return False
+    approved = {value.lower() for value in policy_bundle.approved_providers}
+    return provider.lower() in approved
+
+
+def _register_ai_application(
+    observation: EndpointProcessObservation,
+    match: AIProductMatch,
+) -> AIAsset:
+    identity_key = observation.executable or observation.process_name
+    asset = AIAsset(
+        asset_id=uuid5(
+            NAMESPACE_URL,
+            (
+                "mira-protect-ai-application:"
+                f"{observation.device_id}:{match.provider}:{match.product}:{identity_key}"
+            ),
+        ),
+        kind=AssetKind.APPLICATION,
+        name=match.product,
+        provider=match.provider,
+        deployment_type=match.deployment_type,
+        owner=observation.username,
+        environment="enterprise-endpoint",
+        approved=_provider_is_approved(match.provider),
+        integrations=["mira-protect-endpoint-agent"],
+        attributes={
+            "device_id": observation.device_id,
+            "hostname": observation.hostname,
+            "process_name": observation.process_name,
+            "executable": observation.executable,
+            "executable_sha256": observation.executable_sha256,
+            "classifier_signature": match.signature,
+            "agent_version": observation.agent_version,
+            "policy_version": policy_bundle.version,
+        },
+    )
+    return repository.save_asset(asset)
+
+
+def _parse_timestamp(value: object) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+    except ValueError:
+        return None
+
+
+def _device_views() -> list[EndpointDeviceView]:
+    now = datetime.now(timezone.utc)
+    stale_seconds = float(os.getenv("MIRA_DEVICE_STALE_SECONDS", "180"))
+    offline_seconds = float(os.getenv("MIRA_DEVICE_OFFLINE_SECONDS", "900"))
+    views: list[EndpointDeviceView] = []
+
+    for asset in repository.list_assets():
+        if asset.kind != AssetKind.DEVICE:
+            continue
+        attributes = asset.attributes
+        heartbeat = _parse_timestamp(attributes.get("last_heartbeat"))
+        elapsed: float | None = None
+        health = EndpointHealth.UNKNOWN
+        if heartbeat:
+            elapsed = max(0.0, (now - heartbeat.astimezone(timezone.utc)).total_seconds())
+            if elapsed <= stale_seconds:
+                health = EndpointHealth.ONLINE
+            elif elapsed <= offline_seconds:
+                health = EndpointHealth.STALE
+            else:
+                health = EndpointHealth.OFFLINE
+
+        try:
+            mode = EnforcementMode(str(attributes.get("agent_mode", "monitor")))
+        except ValueError:
+            mode = EnforcementMode.MONITOR
+
+        views.append(
+            EndpointDeviceView(
+                device_id=str(attributes.get("device_id") or asset.name),
+                hostname=asset.name,
+                username=asset.owner,
+                health=health,
+                last_heartbeat=heartbeat,
+                seconds_since_heartbeat=round(elapsed, 3) if elapsed is not None else None,
+                agent_version=attributes.get("agent_version"),
+                mode=mode,
+                platform=attributes.get("platform"),
+                platform_version=attributes.get("platform_version"),
+                policy_version=attributes.get("policy_version"),
+                current_policy_version=policy_bundle.version,
+                queue_depth=int(attributes.get("queue_depth", 0) or 0),
+                ip_addresses=[str(value) for value in attributes.get("ip_addresses", [])],
+            )
+        )
+    return views
 
 
 @app.get("/health")
@@ -113,8 +202,9 @@ def health() -> dict[str, str]:
     return {
         "status": "ok" if database == "ok" else "degraded",
         "service": "mira-protect",
-        "version": "0.2.0",
+        "version": APP_VERSION,
         "database": database,
+        "policy_version": policy_bundle.version,
     }
 
 
@@ -128,6 +218,11 @@ def list_assets() -> list[AIAsset]:
     return repository.list_assets()
 
 
+@app.get("/api/v1/ai-inventory", response_model=list[AIAsset])
+def ai_inventory() -> list[AIAsset]:
+    return [asset for asset in repository.list_assets() if asset.kind == AssetKind.APPLICATION]
+
+
 @app.post("/api/v1/risk/score", response_model=RiskResult)
 def score_risk(factors: RiskFactors) -> RiskResult:
     return risk_engine.score(factors)
@@ -135,7 +230,7 @@ def score_risk(factors: RiskFactors) -> RiskResult:
 
 @app.post("/api/v1/events", response_model=AIEvent)
 def ingest_event(event: AIEvent) -> AIEvent:
-    processed, _ = _process_event(event)
+    processed, _, _ = _process_event(event)
     return processed
 
 
@@ -154,15 +249,34 @@ def list_threats() -> list[ThreatCatalogItem]:
     return get_catalog()
 
 
+@app.get("/api/v1/endpoint/policy", response_model=EndpointPolicyBundle)
+def endpoint_policy(authorization: str | None = Header(default=None)) -> EndpointPolicyBundle:
+    _require_endpoint_token(authorization)
+    return policy_bundle
+
+
+@app.get("/api/v1/endpoint/devices", response_model=list[EndpointDeviceView])
+def endpoint_devices(authorization: str | None = Header(default=None)) -> list[EndpointDeviceView]:
+    _require_endpoint_token(authorization)
+    return _device_views()
+
+
 @app.get("/api/v1/dashboard/summary", response_model=DashboardSummary)
 def dashboard_summary() -> DashboardSummary:
     assets = repository.list_assets()
     events = repository.list_events(limit=2000)
     findings = repository.list_findings(limit=2000)
-    enforcement_events = [event for event in events if event.event_type == EventType.ENDPOINT_ENFORCEMENT]
+    devices = _device_views()
+    enforcement_events = [
+        event for event in events if event.event_type == EventType.ENDPOINT_ENFORCEMENT
+    ]
     return DashboardSummary(
         assets=len(assets),
+        ai_applications=sum(1 for asset in assets if asset.kind == AssetKind.APPLICATION),
         managed_devices=sum(1 for asset in assets if asset.kind == AssetKind.DEVICE),
+        online_devices=sum(1 for device in devices if device.health == EndpointHealth.ONLINE),
+        stale_devices=sum(1 for device in devices if device.health == EndpointHealth.STALE),
+        offline_devices=sum(1 for device in devices if device.health == EndpointHealth.OFFLINE),
         events=len(events),
         findings=len(findings),
         blocked_events=sum(
@@ -182,6 +296,7 @@ def dashboard_summary() -> DashboardSummary:
         critical_findings=sum(1 for finding in findings if finding.severity == RiskLevel.CRITICAL),
         high_findings=sum(1 for finding in findings if finding.severity == RiskLevel.HIGH),
         unapproved_assets=sum(1 for asset in assets if not asset.approved),
+        policy_version=policy_bundle.version,
     )
 
 
@@ -207,6 +322,9 @@ def endpoint_heartbeat(
             "platform_version": heartbeat.platform_version,
             "ip_addresses": heartbeat.ip_addresses,
             "last_heartbeat": heartbeat.timestamp.isoformat(),
+            "policy_version": heartbeat.policy_version,
+            "current_policy_version": policy_bundle.version,
+            "queue_depth": heartbeat.queue_depth,
         },
     )
     repository.save_asset(asset)
@@ -225,6 +343,10 @@ def endpoint_heartbeat(
             "platform": heartbeat.platform,
             "platform_version": heartbeat.platform_version,
             "ip_addresses": heartbeat.ip_addresses,
+            "policy_version": heartbeat.policy_version,
+            "current_policy_version": policy_bundle.version,
+            "queue_depth": heartbeat.queue_depth,
+            "event_phase": "health",
         },
     )
     _process_event(event)
@@ -237,10 +359,12 @@ def evaluate_endpoint_process(
     authorization: str | None = Header(default=None),
 ) -> EndpointDecision:
     _require_endpoint_token(authorization)
-    provider, product = _infer_process_provider(
-        observation.process_name,
-        observation.command_line,
-    )
+    match = classify_ai_process(observation.process_name, observation.command_line)
+    provider = match.provider if match else None
+    product = match.product if match else observation.process_name
+    deployment_type = match.deployment_type if match else AIContext().deployment_type
+    provider_approved = _provider_is_approved(provider)
+
     event = AIEvent(
         event_type=EventType.ENDPOINT_PROCESS,
         timestamp=observation.observed_at,
@@ -252,47 +376,50 @@ def evaluate_endpoint_process(
         ai=AIContext(
             provider=provider,
             product=product,
-            deployment_type=(
-                DeploymentType.PRETRAINED_OR_FINETUNED
-                if provider == "local"
-                else DeploymentType.VENDOR_UI
-            ),
+            deployment_type=deployment_type,
         ),
         input={"command_line": observation.command_line},
         metadata={
+            "event_phase": "discovery",
             "hostname": observation.hostname,
             "pid": observation.pid,
             "parent_pid": observation.parent_pid,
+            "parent_chain": [parent.model_dump(mode="json") for parent in observation.parent_chain],
             "process_name": observation.process_name,
             "executable": observation.executable,
             "executable_sha256": observation.executable_sha256,
             "started_at": observation.started_at.isoformat() if observation.started_at else None,
             "agent_version": observation.agent_version,
             "agent_mode": observation.mode.value,
+            "agent_policy_version": observation.policy_version,
+            "policy_version": policy_bundle.version,
             "matched_local_rules": observation.matched_local_rules,
             "endpoint_attributes": observation.attributes,
+            "provider_approved": provider_approved,
+            "classifier_signature": match.signature if match else None,
         },
     )
-    event, findings = _process_event(event)
+    event, findings, policy_rules = _process_event(event)
+
+    if match:
+        _register_ai_application(observation, match)
 
     if event.security.policy_decision == PolicyDecision.BLOCK:
         if observation.mode == EnforcementMode.ENFORCE:
             effective_action = "terminate"
-            message = "Policy blocked the process; endpoint agent should terminate it."
+            message = "Explicit central policy blocked the process; endpoint may terminate it."
         elif observation.mode == EnforcementMode.GUARD:
             effective_action = "notify"
-            message = (
-                "Policy would block the process; guard mode records and notifies without termination."
-            )
+            message = "Policy would block this process; guard mode records without termination."
         else:
             effective_action = "observe"
-            message = "Policy would block the process; monitor mode records only."
+            message = "Policy would block this process; monitor mode records only."
     elif event.security.policy_decision == PolicyDecision.REQUIRE_APPROVAL:
         effective_action = "notify"
         message = "Human approval is required before the related AI action proceeds."
     else:
         effective_action = "observe"
-        message = "No preventative endpoint action is required."
+        message = "AI software was discovered; no preventative endpoint action is required."
 
     return EndpointDecision(
         decision=event.security.policy_decision,
@@ -300,6 +427,18 @@ def evaluate_endpoint_process(
         matched_rules=event.security.detections,
         finding_ids=[finding.finding_id for finding in findings],
         event_id=event.event_id,
+        policy_version=policy_bundle.version,
+        reason_codes=policy_rules,
+        evidence={
+            "provider": provider,
+            "product": product,
+            "process_name": observation.process_name,
+            "executable": observation.executable,
+            "executable_sha256": observation.executable_sha256,
+            "classifier_signature": match.signature if match else None,
+            "provider_approved": provider_approved,
+            "parent_depth": len(observation.parent_chain),
+        },
         message=message,
     )
 
@@ -309,8 +448,6 @@ def endpoint_enforcement(
     report: EndpointEnforcementReport,
     authorization: str | None = Header(default=None),
 ) -> AIEvent:
-    """Persist endpoint confirmation that a preventative action was attempted."""
-
     _require_endpoint_token(authorization)
     event = AIEvent(
         event_type=EventType.ENDPOINT_ENFORCEMENT,
@@ -323,6 +460,7 @@ def endpoint_enforcement(
             identity=report.username,
         ),
         metadata={
+            "event_phase": "enforcement",
             "hostname": report.hostname,
             "pid": report.pid,
             "process_name": report.process_name,
@@ -331,12 +469,11 @@ def endpoint_enforcement(
             "result": report.result.value,
             "mode": report.mode.value,
             "agent_version": report.agent_version,
+            "policy_version": report.policy_version,
             "reason": report.reason,
             "error": report.error,
         },
     )
-    # An enforcement acknowledgement describes the result of an already-evaluated
-    # decision; re-running it through policy would create a second policy decision.
     event.security.policy_decision = PolicyDecision.BLOCK
     repository.save_event(event)
     return event
