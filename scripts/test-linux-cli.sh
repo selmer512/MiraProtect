@@ -47,6 +47,24 @@ raise SystemExit(0 if sys.version_info >= (3, 12) else 1)
 PY
 }
 
+ensure_venv() {
+  if [[ -d "$VENV_DIR" ]] && { [[ ! -x "$VENV_DIR/bin/python" ]] || [[ ! -f "$VENV_DIR/bin/activate" ]]; }; then
+    info "Removing incomplete Python virtual environment at $VENV_DIR"
+    rm -rf "$VENV_DIR"
+  fi
+
+  if [[ ! -x "$VENV_DIR/bin/python" || ! -f "$VENV_DIR/bin/activate" ]]; then
+    info "Creating Python virtual environment at $VENV_DIR"
+    if ! "$PYTHON_BIN" -m venv "$VENV_DIR"; then
+      rm -rf "$VENV_DIR"
+      fail "Unable to create the Python virtual environment. Install the venv package for $PYTHON_BIN and retry."
+    fi
+  fi
+
+  [[ -x "$VENV_DIR/bin/python" ]] || fail "Virtual environment is missing $VENV_DIR/bin/python"
+  [[ -f "$VENV_DIR/bin/activate" ]] || fail "Virtual environment is missing $VENV_DIR/bin/activate"
+}
+
 command -v "$PYTHON_BIN" >/dev/null 2>&1 || fail "$PYTHON_BIN was not found"
 version_ok || fail "Python 3.12+ is required"
 
@@ -60,10 +78,7 @@ fi
 mkdir -p "$TEST_ROOT"
 rm -f "$TEST_ROOT/mira.db" "$TEST_ROOT/server.log" "$TEST_ROOT/agent.log" "$TEST_ROOT/target.log"
 
-if [[ ! -x "$VENV_DIR/bin/python" ]]; then
-  info "Creating Python virtual environment at $VENV_DIR"
-  "$PYTHON_BIN" -m venv "$VENV_DIR"
-fi
+ensure_venv
 
 # shellcheck disable=SC1091
 source "$VENV_DIR/bin/activate"
