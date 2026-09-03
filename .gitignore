@@ -11,6 +11,8 @@ venv/
 
 # Mira Protect local state
 .mira-test/
+.mira-ai-test/
+.mira-protect/
 *.db
 *.db-journal
 *.sqlite
