@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# Mira Protect local state
+.mira-test/
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Local environment/secrets
+.env
+.env.local
+
+# Build output
+build/
+dist/
+*.spec
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store

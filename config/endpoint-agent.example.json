@@ -1,0 +1,23 @@
+{
+  "control_plane_url": "https://mira-protect.example.corp",
+  "mode": "monitor",
+  "poll_seconds": 2.0,
+  "heartbeat_seconds": 60.0,
+  "request_timeout_seconds": 5.0,
+  "fail_closed": false,
+  "hash_executables": true,
+  "max_hash_bytes": 104857600,
+  "process_names": [
+    "claude.exe",
+    "codex.exe",
+    "copilot.exe",
+    "cursor.exe",
+    "gemini.exe",
+    "ollama.exe"
+  ],
+  "command_markers": [
+    "@anthropic-ai/claude-code",
+    "openai codex",
+    "ollama run"
+  ]
+}

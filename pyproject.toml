@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mira-protect"
+version = "0.2.0"
+description = "Vendor-neutral enterprise AI security control plane"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn[standard]>=0.30,<1",
+  "pydantic>=2.8,<3",
+  "pydantic-settings>=2.4,<3",
+  "sqlalchemy>=2.0,<3",
+  "psycopg[binary]>=3.2,<4",
+  "redis>=5.0,<6",
+  "httpx>=0.27,<1",
+  "structlog>=24.4,<25",
+  "psutil>=6.0,<7",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3,<9",
+  "pytest-asyncio>=0.24,<1",
+  "ruff>=0.6,<1",
+]
+
+[project.scripts]
+mira-protect = "mira_protect.cli:main"
+mira-protect-agent = "mira_protect.endpoint_agent:main"
+mira-protect-server = "mira_protect.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = [".", "src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+# Keep the developer smoke-test lint gate deterministic across Ruff releases and
+# workstation-level Ruff configuration. Broader security/style rules are useful for
+# review, but daemon/network boundaries intentionally catch and report failures so the
+# endpoint agent does not crash because one telemetry source or control plane is down.
+select = ["E4", "E7", "E9", "F", "B", "SIM"]
