@@ -10,7 +10,7 @@ The architecture is guided by the OWASP GenAI COMPASS Observe -> Orient -> Decid
 
 ## Current milestone
 
-The project is at an **enterprise development alpha / endpoint protection test** stage. The first supported test target is a Linux development endpoint operated from the CLI. Windows endpoint packaging remains in the repository for later testing.
+The project is at an **enterprise development alpha / operator-test-ready** stage. The first supported test target is an isolated Linux development endpoint operated from the CLI. Windows endpoint packaging remains in the repository for later testing.
 
 ## Architecture
 
@@ -57,7 +57,7 @@ Endpoint / Browser / SaaS / Network / Identity / Cloud / AI telemetry
 - Managed endpoint heartbeat and device inventory
 - `monitor`, `guard`, and `enforce` endpoint modes
 - Central endpoint deny policy
-- Safe synthetic endpoint block test
+- Explicitly gated synthetic endpoint block test (`MIRA_ENABLE_TEST_CONTROLS`)
 - Process termination enforcement for supported block decisions
 - SQLite local development persistence
 - PostgreSQL support for the containerized control plane
@@ -88,12 +88,14 @@ Requirements: Linux, Bash, Python 3.12+, and Python `venv` support.
 
 ```bash
 git checkout develop/initial-ai-security-platform
+git pull
 chmod +x scripts/validate-local.sh scripts/test-linux-cli.sh
-./scripts/validate-local.sh
 ./scripts/test-linux-cli.sh
 ```
 
-The second script starts a local control plane and Linux endpoint agent, launches a harmless synthetic process carrying the dedicated Mira Protect test marker, verifies that the central policy returns `BLOCK`, verifies that the agent terminates the synthetic process in `enforce` mode, and confirms that the blocked event is persisted.
+`test-linux-cli.sh` runs lint, unit tests, import validation, the local control plane, endpoint heartbeat, central policy evaluation, safe process termination, enforcement acknowledgement, and persistence verification. It writes the evidence bundle under `.mira-test/`, including `.mira-test/validation-report.json`.
+
+The harness starts a loopback-only control plane and Linux endpoint agent, temporarily enables the dedicated synthetic test control, launches a harmless synthetic process carrying the test marker, verifies that central policy returns `BLOCK`, verifies that the agent terminates only that test process in `enforce` mode, confirms the endpoint reports the action, and verifies that the evidence is persisted. Synthetic test controls remain disabled by default during normal operation.
 
 Detailed instructions are in `docs/linux-cli-test.md`.
 
@@ -194,4 +196,4 @@ docs/
   linux-cli-test.md
 ```
 
-GitHub is used as the source repository. Validation is designed to run locally or inside the enterprise/commercial development environment rather than depending on GitHub Actions.
+GitHub is used only as the source repository for this project. Validation and packaging are designed to run locally or inside the enterprise/commercial development environment; GitHub Actions is not part of the test or readiness model.
