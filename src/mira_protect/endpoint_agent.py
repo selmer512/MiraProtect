@@ -45,7 +45,6 @@ DEFAULT_COMMAND_MARKERS = {
     "github copilot",
     "ollama run",
     "openai codex",
-    TEST_BLOCK_MARKER,
 }
 
 
@@ -59,6 +58,7 @@ class AgentConfig:
     heartbeat_seconds: float = 60.0
     request_timeout_seconds: float = 5.0
     fail_closed: bool = False
+    enable_test_controls: bool = False
     hash_executables: bool = True
     max_hash_bytes: int = 100 * 1024 * 1024
     process_names: set[str] = field(default_factory=lambda: set(DEFAULT_AI_PROCESS_NAMES))
@@ -79,7 +79,9 @@ class AgentConfig:
         cfg.token = os.getenv("MIRA_AGENT_TOKEN", data.get("token"))
         cfg.device_id = str(os.getenv("MIRA_DEVICE_ID", data.get("device_id", cfg.device_id)))
         cfg.mode = str(os.getenv("MIRA_AGENT_MODE", data.get("mode", cfg.mode))).lower()
-        cfg.poll_seconds = float(os.getenv("MIRA_POLL_SECONDS", data.get("poll_seconds", cfg.poll_seconds)))
+        cfg.poll_seconds = float(
+            os.getenv("MIRA_POLL_SECONDS", data.get("poll_seconds", cfg.poll_seconds))
+        )
         cfg.heartbeat_seconds = float(
             os.getenv("MIRA_HEARTBEAT_SECONDS", data.get("heartbeat_seconds", cfg.heartbeat_seconds))
         )
@@ -89,7 +91,15 @@ class AgentConfig:
                 data.get("request_timeout_seconds", cfg.request_timeout_seconds),
             )
         )
-        cfg.fail_closed = _as_bool(os.getenv("MIRA_FAIL_CLOSED", data.get("fail_closed", cfg.fail_closed)))
+        cfg.fail_closed = _as_bool(
+            os.getenv("MIRA_FAIL_CLOSED", data.get("fail_closed", cfg.fail_closed))
+        )
+        cfg.enable_test_controls = _as_bool(
+            os.getenv(
+                "MIRA_ENABLE_TEST_CONTROLS",
+                data.get("enable_test_controls", cfg.enable_test_controls),
+            )
+        )
         cfg.hash_executables = _as_bool(
             os.getenv("MIRA_HASH_EXECUTABLES", data.get("hash_executables", cfg.hash_executables))
         )
@@ -194,7 +204,9 @@ class EndpointAgent:
             self.last_heartbeat = now
 
         current_keys: set[tuple[int, float]] = set()
-        for proc in psutil.process_iter(["pid", "ppid", "name", "exe", "cmdline", "create_time", "username"]):
+        for proc in psutil.process_iter(
+            ["pid", "ppid", "name", "exe", "cmdline", "create_time", "username"]
+        ):
             if proc.pid == os.getpid():
                 continue
             try:
@@ -232,6 +244,7 @@ class EndpointAgent:
             mode=self.config.mode,
             control_plane=self.config.control_plane_url,
             fail_closed=self.config.fail_closed,
+            test_controls=self.config.enable_test_controls,
         )
         try:
             while True:
@@ -250,10 +263,11 @@ class EndpointAgent:
 
         if name in self.config.process_names:
             matches.append(f"local:ai-process:{name}")
+        if self.config.enable_test_controls and TEST_BLOCK_MARKER in command:
+            matches.append("local:test-block")
         for marker in sorted(self.config.command_markers):
             if marker and marker in command:
-                rule = "local:test-block" if marker == TEST_BLOCK_MARKER else f"local:ai-command:{marker}"
-                matches.append(rule)
+                matches.append(f"local:ai-command:{marker}")
         return sorted(set(matches))
 
     def _observation(self, info: dict[str, Any], matched_rules: list[str]) -> dict[str, Any]:
@@ -304,12 +318,13 @@ class EndpointAgent:
                 process=observation["process_name"],
                 error=str(exc),
             )
-            local_test_block = "local:test-block" in observation.get("matched_local_rules", [])
-            should_block = self.config.fail_closed or local_test_block
+            should_block = self.config.fail_closed
             return {
                 "decision": "block" if should_block else "monitor",
                 "effective_action": "terminate" if should_block else "observe",
-                "matched_rules": ["agent:offline-fail-closed"] if should_block else ["agent:offline-monitor"],
+                "matched_rules": (
+                    ["agent:offline-fail-closed"] if should_block else ["agent:offline-monitor"]
+                ),
                 "message": "Local fallback decision while control plane is unavailable",
             }
 
