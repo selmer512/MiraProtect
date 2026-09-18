@@ -6,7 +6,7 @@ This is the first supported Mira Protect endpoint protection test path. It is de
 
 The test performs local lint/unit/import validation, starts a Mira Protect control plane, runs the endpoint agent in `enforce` mode, registers the Linux device, launches a harmless synthetic process containing the Mira Protect test marker, receives a central `BLOCK` decision, terminates that process, reports the enforcement result back to the control plane, persists the decision and enforcement evidence, and verifies the expected policy rule.
 
-The synthetic target does not perform a malicious action. Its command line includes `--mira-protect-test-block`, which exists only to exercise the protection path safely.
+The synthetic target does not perform a malicious action. Its command line includes `--mira-protect-test-block`, which exists only to exercise the protection path safely. The marker is ignored unless `MIRA_ENABLE_TEST_CONTROLS=true`; the automated harness enables that flag only inside its isolated loopback test environment.
 
 ## Requirements
 
@@ -58,7 +58,10 @@ The test writes its logs and SQLite database to `.mira-test/`:
 .mira-test/agent.log
 .mira-test/target.log
 .mira-test/mira.db
+.mira-test/validation-report.json
 ```
+
+`validation-report.json` records the tested Git commit/branch, Python version, control-plane address, enforcement mode, completed checks, and final dashboard counts. Preserve this file with the logs when reporting a pass or failure.
 
 ## Automated pass criteria
 
@@ -91,6 +94,7 @@ Start a local control plane in terminal 1:
 ```bash
 export MIRA_DATABASE_URL='sqlite+pysqlite:///./mira-protect-test.db'
 export MIRA_ENDPOINT_TOKEN='replace-this-test-token'
+export MIRA_ENABLE_TEST_CONTROLS='true'
 mira-protect-server --host 127.0.0.1 --port 8080
 ```
 
@@ -100,6 +104,7 @@ Check it from terminal 2:
 source .venv/bin/activate
 export MIRA_CONTROL_PLANE_URL='http://127.0.0.1:8080'
 export MIRA_AGENT_TOKEN='replace-this-test-token'
+export MIRA_ENABLE_TEST_CONTROLS='true'
 mira-protect doctor
 mira-protect health
 ```
@@ -155,7 +160,7 @@ The endpoint agent has three modes:
 - `guard`: notify/record a preventative decision, but do not terminate.
 - `enforce`: apply supported blocking decisions, including process termination.
 
-The first automated Linux smoke test intentionally uses `enforce` only against the dedicated synthetic target. Do not populate real process deny lists until monitor/guard telemetry has been reviewed.
+The first automated Linux smoke test intentionally uses `enforce` only against the dedicated synthetic target. Test controls are disabled by default outside the harness, and an unavailable control plane does not trigger the synthetic block path when `fail_closed=false`. Do not populate real process deny lists until monitor/guard telemetry has been reviewed.
 
 ## Troubleshooting
 
