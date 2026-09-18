@@ -3,13 +3,14 @@ from __future__ import annotations
 import os
 
 os.environ.setdefault("MIRA_DATABASE_URL", "sqlite+pysqlite:///:memory:")
+os.environ.setdefault("MIRA_ENABLE_TEST_CONTROLS", "true")
 
 from fastapi.testclient import TestClient
 
 from mira_protect.app import app, repository
 from mira_protect.endpoint_agent import AgentConfig, EndpointAgent, TEST_BLOCK_MARKER
 from mira_protect.policy import PolicyEngine
-from mira_protect.schemas import AIEvent, EventType
+from mira_protect.schemas import AIEvent, EventType, PolicyDecision
 
 
 client = TestClient(app)
@@ -19,8 +20,13 @@ def setup_function() -> None:
     repository.clear()
 
 
-def test_agent_detects_synthetic_block_marker() -> None:
-    agent = EndpointAgent(AgentConfig(control_plane_url="http://127.0.0.1:9"))
+def test_agent_detects_synthetic_block_marker_when_test_controls_enabled() -> None:
+    agent = EndpointAgent(
+        AgentConfig(
+            control_plane_url="http://127.0.0.1:9",
+            enable_test_controls=True,
+        )
+    )
     try:
         matches = agent._match_process(
             {
@@ -33,17 +39,88 @@ def test_agent_detects_synthetic_block_marker() -> None:
     assert "local:test-block" in matches
 
 
-def test_policy_blocks_synthetic_endpoint_test() -> None:
+def test_agent_ignores_synthetic_marker_when_test_controls_disabled() -> None:
+    agent = EndpointAgent(
+        AgentConfig(
+            control_plane_url="http://127.0.0.1:9",
+            enable_test_controls=False,
+        )
+    )
+    try:
+        matches = agent._match_process(
+            {
+                "name": "notepad.exe",
+                "cmdline": ["notepad.exe", TEST_BLOCK_MARKER],
+            }
+        )
+    finally:
+        agent.close()
+    assert "local:test-block" not in matches
+
+
+def test_policy_blocks_synthetic_endpoint_test_from_command_line() -> None:
     event = AIEvent(
         event_type=EventType.ENDPOINT_PROCESS,
+        input={"command_line": ["notepad.exe", TEST_BLOCK_MARKER]},
         metadata={
             "process_name": "notepad.exe",
             "matched_local_rules": ["local:test-block"],
         },
     )
     decision, rules = PolicyEngine().evaluate(event)
-    assert decision.value == "block"
+    assert decision == PolicyDecision.BLOCK
     assert "endpoint-synthetic-protection-test" in rules
+
+
+def test_local_rule_metadata_cannot_force_synthetic_block_without_marker() -> None:
+    event = AIEvent(
+        event_type=EventType.ENDPOINT_PROCESS,
+        input={"command_line": ["notepad.exe"]},
+        metadata={
+            "process_name": "notepad.exe",
+            "matched_local_rules": ["local:test-block"],
+        },
+    )
+    decision, rules = PolicyEngine().evaluate(event)
+    assert decision != PolicyDecision.BLOCK
+    assert "endpoint-synthetic-protection-test" not in rules
+
+
+def test_synthetic_policy_is_disabled_without_explicit_test_flag(monkeypatch) -> None:
+    monkeypatch.setenv("MIRA_ENABLE_TEST_CONTROLS", "false")
+    event = AIEvent(
+        event_type=EventType.ENDPOINT_PROCESS,
+        input={"command_line": ["python", TEST_BLOCK_MARKER]},
+        metadata={"process_name": "python"},
+    )
+    decision, rules = PolicyEngine().evaluate(event)
+    assert decision != PolicyDecision.BLOCK
+    assert "endpoint-synthetic-protection-test" not in rules
+
+
+def test_offline_agent_does_not_block_test_marker_when_fail_closed_is_false() -> None:
+    agent = EndpointAgent(
+        AgentConfig(
+            control_plane_url="http://127.0.0.1:9",
+            request_timeout_seconds=0.05,
+            fail_closed=False,
+            enable_test_controls=True,
+            mode="enforce",
+        )
+    )
+    try:
+        result = agent._evaluate(
+            {
+                "pid": 999999,
+                "process_name": "python",
+                "matched_local_rules": ["local:test-block"],
+            }
+        )
+    finally:
+        agent.close()
+    assert result["decision"] == "monitor"
+    assert result["effective_action"] == "observe"
+    assert result["matched_rules"] == ["agent:offline-monitor"]
 
 
 def test_endpoint_enforce_mode_requests_termination() -> None:
