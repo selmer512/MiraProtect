@@ -5,6 +5,7 @@
   "heartbeat_seconds": 60.0,
   "request_timeout_seconds": 5.0,
   "fail_closed": false,
+  "enable_test_controls": false,
   "hash_executables": true,
   "max_hash_bytes": 104857600,
   "process_names": [
