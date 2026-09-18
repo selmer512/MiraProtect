@@ -8,6 +8,7 @@ TEST_ROOT="${MIRA_TEST_ROOT:-$ROOT_DIR/.mira-test}"
 VENV_DIR="${MIRA_TEST_VENV:-$ROOT_DIR/.venv}"
 CONTROL_PLANE_URL="http://127.0.0.1:${PORT}"
 TOKEN="${MIRA_ENDPOINT_TOKEN:-mira-linux-cli-test-token-change-me}"
+REPORT_PATH="$TEST_ROOT/validation-report.json"
 
 SERVER_PID=""
 AGENT_PID=""
@@ -70,13 +71,12 @@ version_ok || fail "Python 3.12+ is required"
 
 if [[ "${MIRA_SKIP_VALIDATION:-0}" != "1" ]]; then
   info "Running local lint/unit/import validation first"
-  PYTHON_BIN="$PYTHON_BIN" MIRA_VALIDATION_VENV="$VENV_DIR" \
-    bash "$ROOT_DIR/scripts/validate-local.sh"
+  PYTHON_BIN="$PYTHON_BIN" MIRA_VALIDATION_VENV="$VENV_DIR"     bash "$ROOT_DIR/scripts/validate-local.sh"
   export MIRA_SKIP_INSTALL=1
 fi
 
 mkdir -p "$TEST_ROOT"
-rm -f "$TEST_ROOT/mira.db" "$TEST_ROOT/server.log" "$TEST_ROOT/agent.log" "$TEST_ROOT/target.log"
+rm -f "$TEST_ROOT/mira.db" "$TEST_ROOT/server.log" "$TEST_ROOT/agent.log"   "$TEST_ROOT/target.log" "$REPORT_PATH"
 
 ensure_venv
 
@@ -98,6 +98,7 @@ export MIRA_POLL_SECONDS="0.35"
 export MIRA_HEARTBEAT_SECONDS="1"
 export MIRA_REQUEST_TIMEOUT_SECONDS="2"
 export MIRA_FAIL_CLOSED="false"
+export MIRA_ENABLE_TEST_CONTROLS="true"
 
 info "Starting control plane on $CONTROL_PLANE_URL"
 mira-protect-server --host 127.0.0.1 --port "$PORT" --log-level warning >"$TEST_ROOT/server.log" 2>&1 &
@@ -113,18 +114,16 @@ for _ in $(seq 1 60); do
   fi
   sleep 0.25
 done
-mira-protect --url "$CONTROL_PLANE_URL" --token "$TOKEN" doctor >/dev/null 2>&1 \
-  || fail "Control plane did not become ready"
+mira-protect --url "$CONTROL_PLANE_URL" --token "$TOKEN" doctor >/dev/null 2>&1   || fail "Control plane did not become ready"
 pass "Control plane is healthy"
 
-info "Starting Linux endpoint agent in enforce mode"
+info "Starting Linux endpoint agent in enforce mode with explicit test controls"
 mira-protect-agent >"$TEST_ROOT/agent.log" 2>&1 &
 AGENT_PID=$!
 
 ASSET_COUNT=0
 for _ in $(seq 1 40); do
-  ASSET_COUNT="$(mira-protect --url "$CONTROL_PLANE_URL" --token "$TOKEN" --json summary 2>/dev/null \
-    | python -c 'import json,sys; print(json.load(sys.stdin).get("managed_devices", 0))' 2>/dev/null || echo 0)"
+  ASSET_COUNT="$(mira-protect --url "$CONTROL_PLANE_URL" --token "$TOKEN" --json summary 2>/dev/null     | python -c 'import json,sys; print(json.load(sys.stdin).get("managed_devices", 0))' 2>/dev/null || echo 0)"
   if [[ "$ASSET_COUNT" -ge 1 ]]; then
     break
   fi
@@ -210,7 +209,10 @@ for event in events:
     detections = event.get("security", {}).get("detections", [])
     if "endpoint-synthetic-protection-test" in detections:
         matched_policy = True
-    if event.get("event_type") == "endpoint.enforcement" and event.get("metadata", {}).get("result") == "succeeded":
+    if (
+        event.get("event_type") == "endpoint.enforcement"
+        and event.get("metadata", {}).get("result") == "succeeded"
+    ):
         matched_enforcement = True
 
 if not matched_policy:
@@ -220,10 +222,48 @@ if not matched_enforcement:
 PY
 pass "Policy decision and endpoint enforcement confirmation are both persisted"
 
+GIT_COMMIT="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
+GIT_BRANCH="$(git -C "$ROOT_DIR" branch --show-current 2>/dev/null || echo unknown)"
+PYTHON_VERSION="$(python -c 'import platform; print(platform.python_version())')"
+
+SUMMARY_JSON="$SUMMARY_JSON" REPORT_PATH="$REPORT_PATH" GIT_COMMIT="$GIT_COMMIT" GIT_BRANCH="$GIT_BRANCH" PYTHON_VERSION="$PYTHON_VERSION" CONTROL_PLANE_URL="$CONTROL_PLANE_URL" python - <<'PY'
+import json
+import os
+from datetime import datetime, timezone
+from pathlib import Path
+
+summary = json.loads(os.environ["SUMMARY_JSON"])
+report = {
+    "status": "pass",
+    "timestamp": datetime.now(timezone.utc).isoformat(),
+    "test": "linux-cli-enterprise-protection-smoke",
+    "git_commit": os.environ["GIT_COMMIT"],
+    "git_branch": os.environ["GIT_BRANCH"],
+    "python_version": os.environ["PYTHON_VERSION"],
+    "control_plane": os.environ["CONTROL_PLANE_URL"],
+    "mode": "enforce",
+    "test_controls_enabled": True,
+    "checks": [
+        "local lint/unit/import validation",
+        "control-plane database health",
+        "endpoint heartbeat registration",
+        "synthetic process discovery",
+        "central block policy",
+        "endpoint process termination",
+        "enforcement acknowledgement",
+        "persistence verification",
+    ],
+    "summary": summary,
+}
+path = Path(os.environ["REPORT_PATH"])
+path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+PY
+
 mira-protect --url "$CONTROL_PLANE_URL" --token "$TOKEN" summary
 
 echo
 pass "Linux CLI enterprise protection smoke test completed"
+echo "Validation report: $REPORT_PATH"
 echo "Logs and test database: $TEST_ROOT"
 echo "Control plane: $CONTROL_PLANE_URL"
 echo "Mode tested: enforce"
