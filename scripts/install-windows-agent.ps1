@@ -45,7 +45,7 @@ function Resolve-AgentExecutable {
 
     $python = Get-Command python -ErrorAction SilentlyContinue
     if (-not $python) {
-        throw "MiraProtectAgent.exe was not supplied and Python was not found. Use the Windows endpoint artifact from GitHub Actions or provide Python 3.12+."
+        throw "MiraProtectAgent.exe was not supplied and Python was not found. Provide a locally built endpoint binary or install Python 3.12+."
     }
 
     $venv = Join-Path $InstallDir "venv"
@@ -77,6 +77,7 @@ $config = @{
     heartbeat_seconds = 60.0
     request_timeout_seconds = 5.0
     fail_closed = $false
+    enable_test_controls = $false
     hash_executables = $true
     max_hash_bytes = 104857600
 }
