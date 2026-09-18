@@ -2,9 +2,17 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Callable
+from typing import Any, Callable
 
 from .schemas import AIEvent, EventType, PolicyDecision
+
+TEST_BLOCK_MARKER = "--mira-protect-test-block"
+
+
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 @dataclass(frozen=True)
@@ -60,6 +68,16 @@ class PolicyEngine:
             for value in os.getenv("MIRA_ENDPOINT_DENY_PROCESSES", "").split(",")
             if value.strip()
         }
+        test_controls_enabled = _as_bool(os.getenv("MIRA_ENABLE_TEST_CONTROLS", "false"))
+
+        def is_synthetic_test(event: AIEvent) -> bool:
+            if not test_controls_enabled or event.event_type != EventType.ENDPOINT_PROCESS:
+                return False
+            command_line = event.input.get("command_line", [])
+            if not isinstance(command_line, list):
+                return False
+            command = " ".join(str(value) for value in command_line).lower()
+            return TEST_BLOCK_MARKER in command
 
         return [
             PolicyRule(
@@ -81,11 +99,11 @@ class PolicyEngine:
             ),
             PolicyRule(
                 rule_id="endpoint-synthetic-protection-test",
-                description="Block the harmless Mira Protect endpoint test marker.",
-                predicate=lambda e: (
-                    e.event_type == EventType.ENDPOINT_PROCESS
-                    and "local:test-block" in e.metadata.get("matched_local_rules", [])
+                description=(
+                    "Block the harmless Mira Protect endpoint test marker only when "
+                    "explicit test controls are enabled."
                 ),
+                predicate=is_synthetic_test,
                 decision=PolicyDecision.BLOCK,
             ),
             PolicyRule(
