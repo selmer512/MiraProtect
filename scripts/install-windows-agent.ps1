@@ -15,11 +15,12 @@ param(
 
     [string]$AgentBinary = "",
 
+    [string]$TaskName = "Mira Protect Endpoint Agent",
+
     [string]$RepoRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
-$TaskName = "Mira Protect Endpoint Agent"
 
 function Assert-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
