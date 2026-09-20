@@ -4,7 +4,7 @@ import os
 from datetime import datetime, timezone
 from typing import Iterable
 
-from sqlalchemy import JSON, DateTime, String, create_engine, delete, select, text
+from sqlalchemy import JSON, Boolean, DateTime, String, create_engine, delete, select, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.pool import StaticPool
 
@@ -42,6 +42,20 @@ class FindingRecord(Base):
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class EndpointCredentialRecord(Base):
+    __tablename__ = "endpoint_credentials"
+
+    device_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    last_seen: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+
 class Repository:
     """Persistence boundary for control-plane state.
 
@@ -74,6 +88,50 @@ class Repository:
             return True
         except Exception:
             return False
+
+    def save_endpoint_credential(self, device_id: str, token_hash: str) -> None:
+        now = datetime.now(timezone.utc)
+        with Session(self.engine) as session:
+            existing = session.get(EndpointCredentialRecord, device_id)
+            if existing:
+                existing.token_hash = token_hash
+                existing.created_at = now
+                existing.last_seen = now
+                existing.revoked = False
+            else:
+                session.add(
+                    EndpointCredentialRecord(
+                        device_id=device_id,
+                        token_hash=token_hash,
+                        created_at=now,
+                        last_seen=now,
+                        revoked=False,
+                    )
+                )
+            session.commit()
+
+    def get_endpoint_credential_hash(self, device_id: str) -> str | None:
+        with Session(self.engine) as session:
+            record = session.get(EndpointCredentialRecord, device_id)
+            if not record or record.revoked:
+                return None
+            return record.token_hash
+
+    def touch_endpoint_credential(self, device_id: str) -> None:
+        with Session(self.engine) as session:
+            record = session.get(EndpointCredentialRecord, device_id)
+            if record and not record.revoked:
+                record.last_seen = datetime.now(timezone.utc)
+                session.commit()
+
+    def revoke_endpoint_credential(self, device_id: str) -> bool:
+        with Session(self.engine) as session:
+            record = session.get(EndpointCredentialRecord, device_id)
+            if not record:
+                return False
+            record.revoked = True
+            session.commit()
+            return True
 
     def save_asset(self, asset: AIAsset) -> AIAsset:
         now = datetime.now(timezone.utc)
@@ -142,6 +200,7 @@ class Repository:
 
     def clear(self) -> None:
         with Session(self.engine) as session:
+            session.execute(delete(EndpointCredentialRecord))
             session.execute(delete(FindingRecord))
             session.execute(delete(EventRecord))
             session.execute(delete(AssetRecord))
