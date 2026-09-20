@@ -10,7 +10,7 @@ The architecture is guided by the OWASP GenAI COMPASS Observe -> Orient -> Decid
 
 ## Current milestone
 
-The project is at an **enterprise development alpha / operator-test-ready** stage. The first supported test target is an isolated Linux development endpoint operated from the CLI. Windows endpoint packaging remains in the repository for later testing.
+The project is at an **enterprise development alpha / Windows operator-test-ready** stage. Windows is the first supported endpoint build and end-to-end protection test target. Linux remains available as a secondary CLI validation path.
 
 ## Architecture
 
@@ -82,9 +82,25 @@ Endpoint / Browser / SaaS / Network / Identity / Cloud / AI telemetry
 | POST | `/api/v1/endpoint/heartbeat` | Register/update a managed endpoint |
 | POST | `/api/v1/endpoint/process/evaluate` | Evaluate an endpoint process and return enforcement action |
 
-## First test: Linux CLI protection
+## First build and test: Windows endpoint
 
-Requirements: Linux, Bash, Python 3.12+, and Python `venv` support.
+Run this from native Windows PowerShell, not WSL, because the build produces a native Windows executable:
+
+```powershell
+git checkout develop/initial-ai-security-platform
+git pull
+powershell -ExecutionPolicy Bypass -File .\scripts\test-windows-local.ps1
+```
+
+The Windows harness validates the source, builds `MiraProtectAgent.exe` locally with PyInstaller, starts a loopback control plane, registers the built endpoint agent, launches a harmless synthetic target, verifies the central `BLOCK` decision, confirms process termination and enforcement acknowledgement, verifies persistence, and writes `.mira-test-windows\validation-report.json`.
+
+Build artifacts are written under `dist\windows\`, including `MiraProtect-Windows-Test.zip`, `BUILD-INFO.json`, and `SHA256SUMS.txt`. Detailed instructions are in `docs/windows-first-build.md`.
+
+The synthetic protection path is disabled by default and is enabled only inside the isolated local test through `MIRA_ENABLE_TEST_CONTROLS=true`.
+
+## Secondary test: Linux CLI protection
+
+The Linux CLI harness remains available for cross-platform development validation:
 
 ```bash
 git checkout develop/initial-ai-security-platform
@@ -92,10 +108,6 @@ git pull
 chmod +x scripts/validate-local.sh scripts/test-linux-cli.sh
 ./scripts/test-linux-cli.sh
 ```
-
-`test-linux-cli.sh` runs lint, unit tests, import validation, the local control plane, endpoint heartbeat, central policy evaluation, safe process termination, enforcement acknowledgement, and persistence verification. It writes the evidence bundle under `.mira-test/`, including `.mira-test/validation-report.json`.
-
-The harness starts a loopback-only control plane and Linux endpoint agent, temporarily enables the dedicated synthetic test control, launches a harmless synthetic process carrying the test marker, verifies that central policy returns `BLOCK`, verifies that the agent terminates only that test process in `enforce` mode, confirms the endpoint reports the action, and verifies that the evidence is persisted. Synthetic test controls remain disabled by default during normal operation.
 
 Detailed instructions are in `docs/linux-cli-test.md`.
 
@@ -186,6 +198,9 @@ src/mira_protect/
   endpoint_agent.py  managed endpoint process sensor/enforcer
 
 scripts/
+  build-windows-agent.ps1
+  test-windows-local.ps1
+  windows_agent_entry.py
   validate-local.sh
   test-linux-cli.sh
   install-windows-agent.ps1
@@ -193,6 +208,7 @@ scripts/
   uninstall-windows-agent.ps1
 
 docs/
+  windows-first-build.md
   linux-cli-test.md
 ```
 
