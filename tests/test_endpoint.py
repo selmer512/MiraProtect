@@ -304,6 +304,8 @@ def test_endpoint_enrollment_issues_device_scoped_credential(monkeypatch) -> Non
         headers={"Authorization": f"Bearer {enrollment['device_token']}"},
     )
     assert accepted.status_code == 200
+    summary = client.get("/api/v1/dashboard/summary").json()
+    assert summary["enrolled_devices"] == 1
 
     other_device = dict(heartbeat)
     other_device["device_id"] = "different-device"
@@ -398,3 +400,38 @@ def test_agent_loads_cached_policy_and_uses_cached_deny_offline(tmp_path) -> Non
     assert result["decision"] == "block"
     assert result["effective_action"] == "terminate"
     assert result["matched_rules"] == ["agent:offline-cached-central-deny"]
+
+
+def test_dashboard_marks_endpoint_with_stale_policy(monkeypatch) -> None:
+    monkeypatch.setenv("MIRA_ENROLLMENT_TOKEN", "stale-policy-bootstrap")
+    monkeypatch.setenv("MIRA_ALLOW_SHARED_ENDPOINT_TOKEN", "false")
+    monkeypatch.setenv("MIRA_ENDPOINT_DENY_PROCESSES", "new-policy.exe")
+
+    enrollment = client.post(
+        "/api/v1/endpoint/enroll",
+        json={
+            "device_id": "stale-policy-device",
+            "hostname": "STALE-POLICY-DEVICE",
+            "platform": "Windows",
+        },
+        headers={"Authorization": "Bearer stale-policy-bootstrap"},
+    )
+    assert enrollment.status_code == 200
+    token = enrollment.json()["device_token"]
+
+    heartbeat = client.post(
+        "/api/v1/endpoint/heartbeat",
+        json={
+            "device_id": "stale-policy-device",
+            "hostname": "STALE-POLICY-DEVICE",
+            "platform": "Windows",
+            "mode": "monitor",
+            "policy_version": "older-policy-version",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert heartbeat.status_code == 200
+
+    summary = client.get("/api/v1/dashboard/summary").json()
+    assert summary["enrolled_devices"] == 1
+    assert summary["outdated_policy_devices"] == 1
