@@ -94,8 +94,8 @@ $config = @{
 }
 $config | ConvertTo-Json -Depth 5 | Set-Content -Path $ConfigPath -Encoding UTF8
 
-[Environment]::SetEnvironmentVariable("MIRA_AGENT_CONFIG", $ConfigPath, "Machine")
-[Environment]::SetEnvironmentVariable("MIRA_AGENT_TOKEN", $null, "Machine")
+# The scheduled-task runner sets MIRA_AGENT_CONFIG only for the agent process.
+# Avoid machine-wide environment variables so isolated/test installs cannot affect other agents.
 
 if ($EnrollmentToken) {
     $headers = @{ Authorization = "Bearer $EnrollmentToken" }
