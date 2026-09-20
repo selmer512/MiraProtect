@@ -276,7 +276,6 @@ def dashboard_summary() -> DashboardSummary:
             1
             for asset in assets
             if asset.kind == AssetKind.DEVICE
-            and asset.attributes.get("policy_version")
             and asset.attributes.get("available_policy_version")
             and asset.attributes.get("policy_version")
             != asset.attributes.get("available_policy_version")
@@ -340,7 +339,7 @@ def endpoint_heartbeat(
 ) -> AIAsset:
     _require_endpoint_identity(authorization, heartbeat.device_id)
     policy = _endpoint_policy_bundle()
-    applied_policy_version = heartbeat.policy_version or policy.policy_version
+    applied_policy_version = heartbeat.policy_version
     asset = AIAsset(
         asset_id=uuid5(NAMESPACE_URL, f"mira-protect-device:{heartbeat.device_id}"),
         kind=AssetKind.DEVICE,
