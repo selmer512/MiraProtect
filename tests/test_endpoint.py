@@ -135,7 +135,7 @@ def test_endpoint_enforce_mode_requests_termination() -> None:
             "process_name": "notepad.exe",
             "executable": "C:\\Windows\\System32\\notepad.exe",
             "command_line": ["notepad.exe", TEST_BLOCK_MARKER],
-            "agent_version": "0.2.0",
+            "agent_version": "0.3.0",
             "mode": "enforce",
             "matched_local_rules": ["local:test-block"],
         },
@@ -177,7 +177,7 @@ def test_endpoint_heartbeat_registers_managed_device_without_shadow_ai_finding()
             "device_id": "test-device-03",
             "hostname": "TEST-DEVICE-03",
             "username": "corp\\tester",
-            "agent_version": "0.2.0",
+            "agent_version": "0.3.0",
             "mode": "guard",
             "platform": "Windows",
             "platform_version": "11",
@@ -225,7 +225,7 @@ def test_endpoint_enforcement_confirmation_is_persisted() -> None:
             "action": "terminate",
             "result": "succeeded",
             "mode": "enforce",
-            "agent_version": "0.2.0",
+            "agent_version": "0.3.0",
         },
     )
     assert report.status_code == 200
