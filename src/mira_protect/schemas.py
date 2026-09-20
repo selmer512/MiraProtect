@@ -188,6 +188,8 @@ class ThreatCatalogItem(BaseModel):
 class DashboardSummary(BaseModel):
     assets: int = 0
     managed_devices: int = 0
+    enrolled_devices: int = 0
+    outdated_policy_devices: int = 0
     events: int = 0
     findings: int = 0
     blocked_events: int = 0
