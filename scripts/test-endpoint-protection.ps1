@@ -1,6 +1,7 @@
 param(
     [string]$InstallDir = "$env:ProgramData\MiraProtect",
-    [int]$WaitSeconds = 10
+    [int]$WaitSeconds = 10,
+    [switch]$SyntheticEnforcement
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,7 +14,7 @@ if (-not (Test-Path $ConfigPath)) {
 }
 
 $config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
-$ControlPlaneUrl = $config.control_plane_url.TrimEnd('/')
+$ControlPlaneUrl = $config.control_plane_url.TrimEnd("/")
 $Mode = $config.mode
 $Token = [Environment]::GetEnvironmentVariable("MIRA_AGENT_TOKEN", "Machine")
 $headers = @{}
@@ -21,7 +22,7 @@ if ($Token) {
     $headers["Authorization"] = "Bearer $Token"
 }
 
-Write-Host "Mira Protect enterprise endpoint protection test" -ForegroundColor Cyan
+Write-Host "Mira Protect managed Windows endpoint test" -ForegroundColor Cyan
 Write-Host "Control plane: $ControlPlaneUrl"
 Write-Host "Agent mode:    $Mode"
 
@@ -33,13 +34,64 @@ Write-Host "[PASS] Control plane is healthy" -ForegroundColor Green
 
 $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if (-not $task) {
-    throw "Scheduled task '$TaskName' was not found."
+    throw "Scheduled task $TaskName was not found."
 }
 if ($task.State -ne "Running") {
     Start-ScheduledTask -TaskName $TaskName
     Start-Sleep -Seconds 2
 }
 Write-Host "[PASS] Endpoint agent scheduled task is present" -ForegroundColor Green
+
+$LogPath = Join-Path $InstallDir "logs\agent.log"
+$heartbeatSeen = $false
+for ($i = 0; $i -lt 20; $i++) {
+    if (Test-Path $LogPath) {
+        $logText = Get-Content $LogPath -Raw -ErrorAction SilentlyContinue
+        if ($logText -match '"event":\s*"heartbeat_sent"') {
+            $heartbeatSeen = $true
+            break
+        }
+    }
+    Start-Sleep -Milliseconds 500
+}
+if (-not $heartbeatSeen) {
+    throw "No successful endpoint heartbeat was found in $LogPath."
+}
+Write-Host "[PASS] Endpoint heartbeat is reaching the control plane" -ForegroundColor Green
+
+if (-not $SyntheticEnforcement) {
+    Write-Host ""
+    Write-Host "[PASS] Managed Windows endpoint connectivity test completed." -ForegroundColor Green
+    Write-Host "Synthetic enforcement was not requested. This is the recommended validation for normal monitor-mode installations."
+    return
+}
+
+if (-not [bool]$config.enable_test_controls) {
+    throw "Synthetic enforcement is disabled in agent-config.json. Use the isolated local Windows harness for the first enforcement test, or explicitly enable test controls in a dedicated test environment."
+}
+
+$preflight = @{
+    device_id = "managed-windows-preflight"
+    hostname = $env:COMPUTERNAME
+    username = "$env:USERDOMAIN\$env:USERNAME"
+    pid = 0
+    process_name = "mira-protect-synthetic-preflight"
+    command_line = @("mira-protect-synthetic-preflight", $Marker)
+    mode = "monitor"
+    matched_local_rules = @("local:test-block")
+} | ConvertTo-Json -Depth 5
+
+$preflightResult = Invoke-RestMethod `
+    -Method Post `
+    -Uri "$ControlPlaneUrl/api/v1/endpoint/process/evaluate" `
+    -Headers $headers `
+    -ContentType "application/json" `
+    -Body $preflight
+
+if ($preflightResult.decision -ne "block" -or @($preflightResult.matched_rules) -notcontains "endpoint-synthetic-protection-test") {
+    throw "The control plane does not have explicit synthetic test controls enabled. Do not enable them on a normal shared control plane; use scripts\test-windows-local.ps1 for the isolated enforcement test."
+}
+Write-Host "[PASS] Control plane synthetic test policy is explicitly enabled" -ForegroundColor Green
 
 $notepad = Join-Path $env:SystemRoot "System32\notepad.exe"
 if (-not (Test-Path $notepad)) {
@@ -85,4 +137,4 @@ Write-Host "Event ID: $($event.event_id)"
 Write-Host "Decision: $($event.security.policy_decision)"
 Write-Host "Detections: $($event.security.detections -join ', ')"
 Write-Host ""
-Write-Host "Enterprise endpoint protection test completed successfully." -ForegroundColor Green
+Write-Host "[PASS] Managed Windows synthetic enforcement test completed." -ForegroundColor Green
