@@ -12,6 +12,7 @@ venv/
 # Mira Protect local state
 .mira-test/
 .mira-test-windows/
+.mira-test-managed-windows/
 .build/
 *.db
 *.db-journal
