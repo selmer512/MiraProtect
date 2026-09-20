@@ -236,11 +236,17 @@ try {
     if (Test-Path $PolicyCachePath) {
         Copy-Item $PolicyCachePath $evidencePolicy -Force
     }
-    $deviceCredentialSha256 = [Convert]::ToHexString(
-        [Security.Cryptography.SHA256]::HashData(
-            [Text.Encoding]::UTF8.GetBytes($deviceToken)
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try {
+        $credentialBytes = [Text.Encoding]::UTF8.GetBytes($deviceToken)
+        $credentialHashBytes = $sha256.ComputeHash($credentialBytes)
+        $deviceCredentialSha256 = -join (
+            $credentialHashBytes | ForEach-Object { $_.ToString("x2") }
         )
-    ).ToLowerInvariant()
+    }
+    finally {
+        $sha256.Dispose()
+    }
 
     $buildInfoPath = Join-Path $RepoRoot "dist\windows\BUILD-INFO.json"
     $buildInfo = $null
