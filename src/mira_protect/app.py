@@ -314,6 +314,21 @@ def endpoint_enroll(
         enrollment.device_id,
         _hash_endpoint_token(device_token),
     )
+    enrollment_event = AIEvent(
+        event_type=EventType.ENDPOINT_ENROLLMENT,
+        actor=Actor(
+            device_id=enrollment.device_id,
+            identity=enrollment.device_id,
+        ),
+        metadata={
+            "hostname": enrollment.hostname,
+            "platform": enrollment.platform,
+            "platform_version": enrollment.platform_version,
+            "agent_version": enrollment.agent_version,
+            "credential_type": "per-device-bearer",
+        },
+    )
+    _process_event(enrollment_event)
 
     return EndpointEnrollmentResponse(
         device_id=enrollment.device_id,
