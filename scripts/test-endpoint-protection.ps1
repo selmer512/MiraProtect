@@ -16,7 +16,13 @@ if (-not (Test-Path $ConfigPath)) {
 $config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
 $ControlPlaneUrl = $config.control_plane_url.TrimEnd("/")
 $Mode = $config.mode
-$Token = [Environment]::GetEnvironmentVariable("MIRA_AGENT_TOKEN", "Machine")
+$Token = ""
+if ($config.credential_path -and (Test-Path $config.credential_path)) {
+    $Token = (Get-Content $config.credential_path -Raw).Trim()
+}
+if (-not $Token) {
+    $Token = [Environment]::GetEnvironmentVariable("MIRA_AGENT_TOKEN", "Machine")
+}
 $headers = @{}
 if ($Token) {
     $headers["Authorization"] = "Bearer $Token"
@@ -71,7 +77,7 @@ if (-not [bool]$config.enable_test_controls) {
 }
 
 $preflight = @{
-    device_id = "managed-windows-preflight"
+    device_id = if ($config.device_id) { [string]$config.device_id } else { $env:COMPUTERNAME.ToLowerInvariant() }
     hostname = $env:COMPUTERNAME
     username = "$env:USERDOMAIN\$env:USERNAME"
     pid = 0
