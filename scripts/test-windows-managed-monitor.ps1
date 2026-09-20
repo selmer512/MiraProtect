@@ -190,6 +190,7 @@ try {
     $pidUnderTest = $targetProcess.Id
 
     $matchedEvent = $null
+    $script:matchedEvent = $null
     Wait-ForCondition -Attempts 60 -FailureMessage "Managed agent did not report the centrally denied process." -Condition {
         try {
             $events = Invoke-RestMethod -Method Get -Uri "$ControlPlaneUrl/api/v1/events?limit=200" -TimeoutSec 2
@@ -227,6 +228,20 @@ try {
     }
     Write-Host "[PASS] Inventory records the endpoint applied policy version" -ForegroundColor Green
 
+    $evidenceAgentLog = Join-Path $TestRoot "agent.log"
+    $evidencePolicy = Join-Path $TestRoot "policy-cache.json"
+    if (Test-Path $AgentLog) {
+        Copy-Item $AgentLog $evidenceAgentLog -Force
+    }
+    if (Test-Path $PolicyCachePath) {
+        Copy-Item $PolicyCachePath $evidencePolicy -Force
+    }
+    $deviceCredentialSha256 = [Convert]::ToHexString(
+        [Security.Cryptography.SHA256]::HashData(
+            [Text.Encoding]::UTF8.GetBytes($deviceToken)
+        )
+    ).ToLowerInvariant()
+
     $buildInfoPath = Join-Path $RepoRoot "dist\windows\BUILD-INFO.json"
     $buildInfo = $null
     if (Test-Path $buildInfoPath) {
@@ -242,6 +257,7 @@ try {
         install_dir = $InstallDir
         mode = "monitor"
         enrollment = "per-device"
+        device_credential_sha256 = $deviceCredentialSha256
         policy_version = $policy.policy_version
         central_deny_process = "notepad.exe"
         central_decision = $matchedEvent.security.policy_decision
@@ -265,8 +281,8 @@ try {
     Write-Host ""
     Write-Host "[PASS] Mira Protect managed Windows monitor milestone completed." -ForegroundColor Green
     Write-Host "Validation report: $ReportPath"
-    Write-Host "Agent log:        $AgentLog"
-    Write-Host "Policy cache:     $PolicyCachePath"
+    Write-Host "Agent log:        $evidenceAgentLog"
+    Write-Host "Policy cache:     $evidencePolicy"
 }
 finally {
     Stop-TestProcess $targetProcess
