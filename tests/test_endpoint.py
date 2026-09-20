@@ -306,6 +306,8 @@ def test_endpoint_enrollment_issues_device_scoped_credential(monkeypatch) -> Non
     assert accepted.status_code == 200
     summary = client.get("/api/v1/dashboard/summary").json()
     assert summary["enrolled_devices"] == 1
+    events = client.get("/api/v1/events").json()
+    assert any(event["event_type"] == "endpoint.enrollment" for event in events)
 
     other_device = dict(heartbeat)
     other_device["device_id"] = "different-device"
