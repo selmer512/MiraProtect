@@ -117,6 +117,13 @@ class Repository:
                 return None
             return record.token_hash
 
+    def count_endpoint_credentials(self) -> int:
+        with Session(self.engine) as session:
+            rows = session.scalars(
+                select(EndpointCredentialRecord).where(EndpointCredentialRecord.revoked.is_(False))
+            ).all()
+            return len(rows)
+
     def touch_endpoint_credential(self, device_id: str) -> None:
         with Session(self.engine) as session:
             record = session.get(EndpointCredentialRecord, device_id)
