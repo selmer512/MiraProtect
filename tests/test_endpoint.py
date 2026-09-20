@@ -257,3 +257,144 @@ def test_endpoint_token_is_enforced_when_configured(monkeypatch) -> None:
         headers={"Authorization": "Bearer test-secret"},
     )
     assert authorized.status_code == 200
+
+
+def test_endpoint_enrollment_issues_device_scoped_credential(monkeypatch) -> None:
+    monkeypatch.setenv("MIRA_ENROLLMENT_TOKEN", "bootstrap-secret")
+    monkeypatch.setenv("MIRA_ALLOW_SHARED_ENDPOINT_TOKEN", "false")
+    payload = {
+        "device_id": "enrolled-windows-01",
+        "hostname": "ENROLLED-WINDOWS-01",
+        "platform": "Windows",
+        "platform_version": "11",
+        "agent_version": "0.3.0",
+    }
+
+    unauthorized = client.post("/api/v1/endpoint/enroll", json=payload)
+    assert unauthorized.status_code == 401
+
+    enrolled = client.post(
+        "/api/v1/endpoint/enroll",
+        json=payload,
+        headers={"Authorization": "Bearer bootstrap-secret"},
+    )
+    assert enrolled.status_code == 200
+    enrollment = enrolled.json()
+    assert enrollment["device_id"] == payload["device_id"]
+    assert enrollment["device_token"]
+    assert enrollment["policy_url"].endswith(payload["device_id"])
+
+    heartbeat = {
+        "device_id": payload["device_id"],
+        "hostname": payload["hostname"],
+        "platform": "Windows",
+        "mode": "monitor",
+        "agent_version": "0.3.0",
+    }
+    rejected = client.post(
+        "/api/v1/endpoint/heartbeat",
+        json=heartbeat,
+        headers={"Authorization": "Bearer wrong-device-token"},
+    )
+    assert rejected.status_code == 401
+
+    accepted = client.post(
+        "/api/v1/endpoint/heartbeat",
+        json=heartbeat,
+        headers={"Authorization": f"Bearer {enrollment['device_token']}"},
+    )
+    assert accepted.status_code == 200
+
+    other_device = dict(heartbeat)
+    other_device["device_id"] = "different-device"
+    cross_device = client.post(
+        "/api/v1/endpoint/heartbeat",
+        json=other_device,
+        headers={"Authorization": f"Bearer {enrollment['device_token']}"},
+    )
+    assert cross_device.status_code == 401
+
+
+def test_enrolled_endpoint_receives_versioned_policy(monkeypatch) -> None:
+    monkeypatch.setenv("MIRA_ENROLLMENT_TOKEN", "policy-bootstrap")
+    monkeypatch.setenv("MIRA_ALLOW_SHARED_ENDPOINT_TOKEN", "false")
+    monkeypatch.setenv("MIRA_ENDPOINT_DENY_PROCESSES", "blocked-ai.exe,legacy-ai.exe")
+    monkeypatch.setenv("MIRA_ENDPOINT_PROCESS_NAMES", "custom-assistant.exe")
+    monkeypatch.setenv("MIRA_ENDPOINT_COMMAND_MARKERS", "corp-ai-wrapper")
+    monkeypatch.setenv("MIRA_POLICY_REFRESH_SECONDS", "120")
+
+    enrollment = client.post(
+        "/api/v1/endpoint/enroll",
+        json={
+            "device_id": "policy-device-01",
+            "hostname": "POLICY-DEVICE-01",
+            "platform": "Windows",
+        },
+        headers={"Authorization": "Bearer policy-bootstrap"},
+    )
+    assert enrollment.status_code == 200
+    token = enrollment.json()["device_token"]
+
+    policy = client.get(
+        "/api/v1/endpoint/policy/policy-device-01",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert policy.status_code == 200
+    body = policy.json()
+    assert len(body["policy_version"]) == 16
+    assert body["refresh_seconds"] == 120
+    assert body["deny_processes"] == ["blocked-ai.exe", "legacy-ai.exe"]
+    assert body["process_names"] == ["custom-assistant.exe"]
+    assert body["command_markers"] == ["corp-ai-wrapper"]
+    assert body["enable_test_controls"] is True
+
+
+def test_agent_loads_cached_policy_and_uses_cached_deny_offline(tmp_path) -> None:
+    cache_path = tmp_path / "policy-cache.json"
+    cache_path.write_text(
+        """{
+  "policy_version": "cached-policy-1",
+  "refresh_seconds": 300,
+  "deny_processes": ["blocked-ai.exe"],
+  "process_names": [],
+  "command_markers": [],
+  "fail_closed": true,
+  "enable_test_controls": false,
+  "recommended_mode": "monitor"
+}
+""",
+        encoding="utf-8",
+    )
+    agent = EndpointAgent(
+        AgentConfig(
+            control_plane_url="http://127.0.0.1:9",
+            request_timeout_seconds=0.05,
+            policy_cache_path=str(cache_path),
+            fail_closed=False,
+            mode="enforce",
+        )
+    )
+    try:
+        matches = agent._match_process(
+            {
+                "name": "blocked-ai.exe",
+                "cmdline": ["blocked-ai.exe"],
+            }
+        )
+        assert "local:central-deny-process:blocked-ai.exe" in matches
+        assert agent.policy_version == "cached-policy-1"
+        assert agent.config.fail_closed is True
+
+        result = agent._evaluate(
+            {
+                "pid": 999998,
+                "process_name": "blocked-ai.exe",
+                "matched_local_rules": matches,
+            }
+        )
+    finally:
+        agent.close()
+
+    assert result["decision"] == "block"
+    assert result["effective_action"] == "terminate"
+    assert result["matched_rules"] == ["agent:offline-cached-central-deny"]
