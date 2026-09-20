@@ -10,7 +10,7 @@ The architecture is guided by the OWASP GenAI COMPASS Observe -> Orient -> Decid
 
 ## Current milestone
 
-The project is at an **enterprise development alpha / Windows operator-test-ready** stage. Windows is the first supported endpoint build and end-to-end protection test target. Linux remains available as a secondary CLI validation path.
+The project is at an **enterprise development alpha / managed Windows monitor milestone** stage. The native Windows protection loop has passed its first local end-to-end test; the current milestone adds persistent SYSTEM deployment, per-device enrollment, versioned central policy, and local policy caching.
 
 ## Architecture
 
@@ -55,6 +55,8 @@ Endpoint / Browser / SaaS / Network / Identity / Cloud / AI telemetry
 - AI CLI/runtime discovery for tools such as Claude, Codex, Copilot, Cursor, Gemini, Ollama, LM Studio, Aider, and OpenCode
 - Endpoint executable hashing
 - Managed endpoint heartbeat and device inventory
+- Per-device bootstrap enrollment and device-scoped credentials
+- Versioned centralized endpoint policy distribution and local policy cache
 - `monitor`, `guard`, and `enforce` endpoint modes
 - Central endpoint deny policy
 - Explicitly gated synthetic endpoint block test (`MIRA_ENABLE_TEST_CONTROLS`)
@@ -79,6 +81,8 @@ Endpoint / Browser / SaaS / Network / Identity / Cloud / AI telemetry
 | GET | `/api/v1/threats` | List COMPASS-aligned threat content |
 | GET | `/api/v1/dashboard/summary` | Return security summary counts |
 | POST | `/api/v1/risk/score` | Calculate contextual AI risk |
+| POST | `/api/v1/endpoint/enroll` | Exchange a bootstrap token for a per-device credential |
+| GET | `/api/v1/endpoint/policy/{device_id}` | Retrieve authenticated versioned endpoint policy |
 | POST | `/api/v1/endpoint/heartbeat` | Register/update a managed endpoint |
 | POST | `/api/v1/endpoint/process/evaluate` | Evaluate an endpoint process and return enforcement action |
 
@@ -97,6 +101,16 @@ The Windows harness validates the source, builds `MiraProtectAgent.exe` locally 
 Build artifacts are written under `dist\windows\`, including `MiraProtect-Windows-Test.zip`, `BUILD-INFO.json`, and `SHA256SUMS.txt`. Detailed instructions are in `docs/windows-first-build.md`.
 
 The synthetic protection path is disabled by default and is enabled only inside the isolated local test through `MIRA_ENABLE_TEST_CONTROLS=true`.
+
+## Next milestone test: persistent managed Windows monitor
+
+After pulling the latest branch, open Windows PowerShell as Administrator and run:
+
+    powershell -ExecutionPolicy Bypass -File .\scripts\test-windows-managed-monitor.ps1
+
+This isolated harness rebuilds the 0.3 endpoint, starts an enrollment-enabled control plane, installs the compiled agent as a persistent SYSTEM scheduled task, exchanges a bootstrap enrollment token for a per-device credential, downloads/caches versioned policy, and validates a centrally denied Notepad process in monitor mode. The control plane must record BLOCK while Notepad remains running.
+
+The milestone report is written to .mira-test-managed-windows\validation-report.json. The isolated scheduled task and ProgramData test directory are removed during cleanup.
 
 ## Secondary test: Linux CLI protection
 
@@ -169,8 +183,8 @@ Enterprise rollout should progress from monitor -> guard -> enforce after teleme
 
 ## Next commercial-development milestones
 
-- Per-device enrollment and stronger device identity
-- Signed/versioned endpoint policy bundles and local policy cache
+- TLS/mTLS deployment configuration and certificate-based device identity
+- Signed policy/update artifacts and policy provenance
 - TLS/mTLS deployment configuration
 - RBAC for administrative APIs
 - Database migrations
@@ -200,6 +214,7 @@ src/mira_protect/
 scripts/
   build-windows-agent.ps1
   test-windows-local.ps1
+  test-windows-managed-monitor.ps1
   windows_agent_entry.py
   validate-local.sh
   test-linux-cli.sh
