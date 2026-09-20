@@ -18,7 +18,7 @@ DEFAULT_URL = "http://127.0.0.1:8080"
 def _client(args: argparse.Namespace) -> httpx.Client:
     base_url = str(args.url or os.getenv("MIRA_CONTROL_PLANE_URL", DEFAULT_URL)).rstrip("/")
     token = args.token or os.getenv("MIRA_AGENT_TOKEN") or os.getenv("MIRA_ENDPOINT_TOKEN")
-    headers = {"User-Agent": "MiraProtectCLI/0.2.0"}
+    headers = {"User-Agent": "MiraProtectCLI/0.3.0"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
     return httpx.Client(base_url=base_url, headers=headers, timeout=args.timeout)
