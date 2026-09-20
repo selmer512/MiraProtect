@@ -76,8 +76,13 @@ if (-not [bool]$config.enable_test_controls) {
     throw "Synthetic enforcement is disabled in agent-config.json. Use the isolated local Windows harness for the first enforcement test, or explicitly enable test controls in a dedicated test environment."
 }
 
+$PreflightDeviceId = $env:COMPUTERNAME.ToLowerInvariant()
+if ($config.device_id) {
+    $PreflightDeviceId = [string]$config.device_id
+}
+
 $preflight = @{
-    device_id = if ($config.device_id) { [string]$config.device_id } else { $env:COMPUTERNAME.ToLowerInvariant() }
+    device_id = $PreflightDeviceId
     hostname = $env:COMPUTERNAME
     username = "$env:USERDOMAIN\$env:USERNAME"
     pid = 0
