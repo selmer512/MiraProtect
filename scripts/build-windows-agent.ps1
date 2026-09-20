@@ -62,7 +62,8 @@ if (Test-Path $VenvDir) {
 if (-not (Test-Path $VenvDir)) {
     New-Item -Path $BuildRoot -ItemType Directory -Force | Out-Null
     Write-Host "Creating Windows build virtual environment..." -ForegroundColor Cyan
-    & $basePython.Exe @($basePython.Prefix) -m venv $VenvDir
+    $venvArgs = @($basePython.Prefix) + @("-m", "venv", $VenvDir)
+    & $basePython.Exe @venvArgs
     Assert-LastExitCode "Virtual environment creation"
 }
 
@@ -79,7 +80,14 @@ Assert-LastExitCode "Mira Protect build dependency installation"
 
 if (-not $SkipValidation) {
     Write-Host "Running Windows source validation..." -ForegroundColor Cyan
-    & $VenvPython -m ruff check --config (Join-Path $RepoRoot "pyproject.toml") (Join-Path $RepoRoot "src") (Join-Path $RepoRoot "tests")
+    $RuffExe = Join-Path $VenvDir "Scripts\ruff.exe"
+    $PytestExe = Join-Path $VenvDir "Scripts\pytest.exe"
+    foreach ($tool in @($RuffExe, $PytestExe)) {
+        if (-not (Test-Path $tool)) {
+            throw "Required validation tool was not installed: $tool"
+        }
+    }
+    & $RuffExe check --config (Join-Path $RepoRoot "pyproject.toml") (Join-Path $RepoRoot "src") (Join-Path $RepoRoot "tests")
     Assert-LastExitCode "Ruff validation"
 
     $previousDb = $env:MIRA_DATABASE_URL
@@ -87,7 +95,7 @@ if (-not $SkipValidation) {
     try {
         $env:MIRA_DATABASE_URL = "sqlite+pysqlite:///:memory:"
         $env:MIRA_ENABLE_TEST_CONTROLS = "true"
-        & $VenvPython -m pytest -q (Join-Path $RepoRoot "tests")
+        & $PytestExe -q (Join-Path $RepoRoot "tests")
         Assert-LastExitCode "Pytest validation"
     }
     finally {
@@ -155,6 +163,7 @@ Copy-Item (Join-Path $RepoRoot "scripts\install-windows-agent.ps1") (Join-Path $
 Copy-Item (Join-Path $RepoRoot "scripts\test-endpoint-protection.ps1") (Join-Path $PackageDir "test-endpoint-protection.ps1")
 Copy-Item (Join-Path $RepoRoot "scripts\uninstall-windows-agent.ps1") (Join-Path $PackageDir "uninstall-windows-agent.ps1")
 Copy-Item (Join-Path $RepoRoot "config\endpoint-agent.example.json") (Join-Path $PackageDir "endpoint-agent.example.json")
+Copy-Item (Join-Path $RepoRoot "docs\windows-first-build.md") (Join-Path $PackageDir "WINDOWS-FIRST-BUILD.md")
 
 $zipPath = Join-Path $OutputDir "MiraProtect-Windows-Test.zip"
 Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
