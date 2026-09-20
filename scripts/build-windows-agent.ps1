@@ -192,7 +192,6 @@ Copy-Item (Join-Path $OutputDir "BUILD-INFO.json") (Join-Path $PackageDir "BUILD
 Copy-Item (Join-Path $OutputDir "SHA256SUMS.txt") (Join-Path $PackageDir "SHA256SUMS.txt")
 Copy-Item (Join-Path $RepoRoot "scripts\install-windows-agent.ps1") (Join-Path $PackageDir "install-windows-agent.ps1")
 Copy-Item (Join-Path $RepoRoot "scripts\test-endpoint-protection.ps1") (Join-Path $PackageDir "test-endpoint-protection.ps1")
-Copy-Item (Join-Path $RepoRoot "scripts\test-windows-managed-monitor.ps1") (Join-Path $PackageDir "test-windows-managed-monitor.ps1")
 Copy-Item (Join-Path $RepoRoot "scripts\uninstall-windows-agent.ps1") (Join-Path $PackageDir "uninstall-windows-agent.ps1")
 Copy-Item (Join-Path $RepoRoot "config\endpoint-agent.example.json") (Join-Path $PackageDir "endpoint-agent.example.json")
 Copy-Item (Join-Path $RepoRoot "docs\windows-first-build.md") (Join-Path $PackageDir "WINDOWS-FIRST-BUILD.md")
