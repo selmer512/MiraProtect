@@ -271,6 +271,16 @@ def dashboard_summary() -> DashboardSummary:
     return DashboardSummary(
         assets=len(assets),
         managed_devices=sum(1 for asset in assets if asset.kind == AssetKind.DEVICE),
+        enrolled_devices=repository.count_endpoint_credentials(),
+        outdated_policy_devices=sum(
+            1
+            for asset in assets
+            if asset.kind == AssetKind.DEVICE
+            and asset.attributes.get("policy_version")
+            and asset.attributes.get("available_policy_version")
+            and asset.attributes.get("policy_version")
+            != asset.attributes.get("available_policy_version")
+        ),
         events=len(events),
         findings=len(findings),
         blocked_events=sum(
