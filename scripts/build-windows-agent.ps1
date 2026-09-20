@@ -14,6 +14,7 @@ $BuildRoot = Join-Path $RepoRoot ".build\windows"
 $VenvDir = Join-Path $BuildRoot "venv"
 $WorkDir = Join-Path $BuildRoot "pyinstaller"
 $SpecDir = Join-Path $BuildRoot "spec"
+$StageDistDir = Join-Path $BuildRoot "dist"
 $PackageDir = Join-Path $BuildRoot "package"
 $EntryPoint = Join-Path $RepoRoot "scripts\windows_agent_entry.py"
 
@@ -137,14 +138,16 @@ if (-not $SkipValidation) {
 
 Remove-Item $WorkDir -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item $SpecDir -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item $StageDistDir -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item $PackageDir -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -Path $OutputDir -ItemType Directory -Force | Out-Null
 New-Item -Path $WorkDir -ItemType Directory -Force | Out-Null
 New-Item -Path $SpecDir -ItemType Directory -Force | Out-Null
+New-Item -Path $StageDistDir -ItemType Directory -Force | Out-Null
 New-Item -Path $PackageDir -ItemType Directory -Force | Out-Null
 
 $AgentExe = Join-Path $OutputDir "MiraProtectAgent.exe"
-Remove-Item $AgentExe -Force -ErrorAction SilentlyContinue
+$StagedAgentExe = Join-Path $StageDistDir "MiraProtectAgent.exe"
 
 Write-Host "Building MiraProtectAgent.exe..." -ForegroundColor Cyan
 & $VenvPython -m PyInstaller `
@@ -152,18 +155,40 @@ Write-Host "Building MiraProtectAgent.exe..." -ForegroundColor Cyan
     --clean `
     --onefile `
     --name "MiraProtectAgent" `
-    --distpath $OutputDir `
+    --distpath $StageDistDir `
     --workpath $WorkDir `
     --specpath $SpecDir `
     --paths (Join-Path $RepoRoot "src") `
     $EntryPoint
 Assert-LastExitCode "PyInstaller build"
 
-if (-not (Test-Path $AgentExe)) {
-    throw "Build completed without producing $AgentExe."
+if (-not (Test-Path $StagedAgentExe)) {
+    throw "Build completed without producing $StagedAgentExe."
 }
 
-$hash = (Get-FileHash -Path $AgentExe -Algorithm SHA256).Hash.ToLowerInvariant()
+$hash = (Get-FileHash -Path $StagedAgentExe -Algorithm SHA256).Hash.ToLowerInvariant()
+$shortHash = $hash.Substring(0, 12)
+$VersionedAgentExe = Join-Path $OutputDir "MiraProtectAgent-0.3.0-$shortHash.exe"
+Copy-Item $StagedAgentExe $VersionedAgentExe -Force
+
+$PublishedAgentExe = $AgentExe
+$publishedCanonical = $false
+for ($attempt = 1; $attempt -le 10; $attempt++) {
+    try {
+        Copy-Item $StagedAgentExe $AgentExe -Force -ErrorAction Stop
+        $publishedCanonical = $true
+        break
+    }
+    catch {
+        if ($attempt -lt 10) {
+            Start-Sleep -Milliseconds 500
+        }
+    }
+}
+if (-not $publishedCanonical) {
+    $PublishedAgentExe = $VersionedAgentExe
+    Write-Warning "The existing $AgentExe is locked. The new build was published as $VersionedAgentExe instead."
+}
 $gitCommit = "unknown"
 $gitBranch = "unknown"
 if (Get-Command git -ErrorAction SilentlyContinue) {
@@ -182,12 +207,15 @@ $buildInfo = [ordered]@{
     git_commit = "$gitCommit".Trim()
     git_branch = "$gitBranch".Trim()
     sha256 = $hash
+    agent_executable = $PublishedAgentExe
+    canonical_executable = $AgentExe
+    canonical_updated = $publishedCanonical
     validation_skipped = [bool]$SkipValidation
 }
 $buildInfo | ConvertTo-Json -Depth 4 | Set-Content -Path (Join-Path $OutputDir "BUILD-INFO.json") -Encoding UTF8
 "$hash  MiraProtectAgent.exe" | Set-Content -Path (Join-Path $OutputDir "SHA256SUMS.txt") -Encoding ASCII
 
-Copy-Item $AgentExe (Join-Path $PackageDir "MiraProtectAgent.exe")
+Copy-Item $StagedAgentExe (Join-Path $PackageDir "MiraProtectAgent.exe")
 Copy-Item (Join-Path $OutputDir "BUILD-INFO.json") (Join-Path $PackageDir "BUILD-INFO.json")
 Copy-Item (Join-Path $OutputDir "SHA256SUMS.txt") (Join-Path $PackageDir "SHA256SUMS.txt")
 Copy-Item (Join-Path $RepoRoot "scripts\install-windows-agent.ps1") (Join-Path $PackageDir "install-windows-agent.ps1")
@@ -202,7 +230,10 @@ Compress-Archive -Path (Join-Path $PackageDir "*") -DestinationPath $zipPath -Co
 
 Write-Host ""
 Write-Host "[PASS] Mira Protect Windows endpoint build completed." -ForegroundColor Green
-Write-Host "Agent:      $AgentExe"
+Write-Host "Agent:      $PublishedAgentExe"
+if (-not $publishedCanonical) {
+    Write-Host "Canonical:  $AgentExe (locked; not replaced)" -ForegroundColor Yellow
+}
 Write-Host "SHA-256:    $hash"
 Write-Host "Package:    $zipPath"
 Write-Host "Build info: $(Join-Path $OutputDir "BUILD-INFO.json")"
