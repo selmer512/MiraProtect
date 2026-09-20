@@ -94,6 +94,22 @@ Assert-LastExitCode "pip upgrade"
 Assert-LastExitCode "Mira Protect build dependency installation"
 
 if (-not $SkipValidation) {
+    Write-Host "Validating PowerShell scripts..." -ForegroundColor Cyan
+    $PowerShellScripts = Get-ChildItem (Join-Path $RepoRoot "scripts") -Filter "*.ps1" -File
+    foreach ($script in $PowerShellScripts) {
+        $tokens = $null
+        $parseErrors = $null
+        [System.Management.Automation.Language.Parser]::ParseFile(
+            $script.FullName,
+            [ref]$tokens,
+            [ref]$parseErrors
+        ) | Out-Null
+        if ($parseErrors.Count -gt 0) {
+            $details = ($parseErrors | ForEach-Object { $_.Message }) -join "; "
+            throw "PowerShell syntax validation failed for $($script.Name): $details"
+        }
+    }
+
     Write-Host "Running Windows source validation..." -ForegroundColor Cyan
     $RuffExe = Join-Path $VenvDir "Scripts\ruff.exe"
     $PytestExe = Join-Path $VenvDir "Scripts\pytest.exe"
