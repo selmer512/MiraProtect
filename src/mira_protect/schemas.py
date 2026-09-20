@@ -218,6 +218,34 @@ class RiskResult(BaseModel):
     level: RiskLevel
 
 
+class EndpointEnrollmentRequest(BaseModel):
+    device_id: str
+    hostname: str
+    platform: str
+    platform_version: str | None = None
+    agent_version: str = "0.3.0"
+
+
+class EndpointEnrollmentResponse(BaseModel):
+    device_id: str
+    device_token: str
+    issued_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    policy_url: str
+    message: str = "Endpoint enrolled"
+
+
+class EndpointPolicyBundle(BaseModel):
+    policy_version: str
+    issued_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    refresh_seconds: int = Field(default=300, ge=30, le=86400)
+    deny_processes: list[str] = Field(default_factory=list)
+    process_names: list[str] = Field(default_factory=list)
+    command_markers: list[str] = Field(default_factory=list)
+    fail_closed: bool = False
+    enable_test_controls: bool = False
+    recommended_mode: EnforcementMode | None = None
+
+
 class EndpointProcessObservation(BaseModel):
     """Process telemetry submitted by a managed endpoint agent.
 
@@ -237,7 +265,7 @@ class EndpointProcessObservation(BaseModel):
     executable_sha256: str | None = None
     started_at: datetime | None = None
     observed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    agent_version: str = "0.2.0"
+    agent_version: str = "0.3.0"
     mode: EnforcementMode = EnforcementMode.MONITOR
     matched_local_rules: list[str] = Field(default_factory=list)
     attributes: dict[str, Any] = Field(default_factory=dict)
