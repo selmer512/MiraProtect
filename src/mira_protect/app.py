@@ -330,6 +330,7 @@ def endpoint_heartbeat(
 ) -> AIAsset:
     _require_endpoint_identity(authorization, heartbeat.device_id)
     policy = _endpoint_policy_bundle()
+    applied_policy_version = heartbeat.policy_version or policy.policy_version
     asset = AIAsset(
         asset_id=uuid5(NAMESPACE_URL, f"mira-protect-device:{heartbeat.device_id}"),
         kind=AssetKind.DEVICE,
@@ -345,7 +346,8 @@ def endpoint_heartbeat(
             "platform": heartbeat.platform,
             "platform_version": heartbeat.platform_version,
             "ip_addresses": heartbeat.ip_addresses,
-            "policy_version": policy.policy_version,
+            "policy_version": applied_policy_version,
+            "available_policy_version": policy.policy_version,
             "last_heartbeat": heartbeat.timestamp.isoformat(),
         },
     )
@@ -365,7 +367,8 @@ def endpoint_heartbeat(
             "platform": heartbeat.platform,
             "platform_version": heartbeat.platform_version,
             "ip_addresses": heartbeat.ip_addresses,
-            "policy_version": policy.policy_version,
+            "policy_version": applied_policy_version,
+            "available_policy_version": policy.policy_version,
         },
     )
     _process_event(event)
