@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import hmac
+import json
 import os
+import secrets
 from uuid import NAMESPACE_URL, uuid5
 
 from fastapi import FastAPI, Header, HTTPException, Query, status
@@ -22,7 +25,10 @@ from .schemas import (
     DetectionFinding,
     EndpointDecision,
     EndpointEnforcementReport,
+    EndpointEnrollmentRequest,
+    EndpointEnrollmentResponse,
     EndpointHeartbeat,
+    EndpointPolicyBundle,
     EndpointProcessObservation,
     EnforcementMode,
     EventType,
@@ -35,7 +41,7 @@ from .schemas import (
 
 app = FastAPI(
     title="Mira Protect",
-    version="0.2.0",
+    version="0.3.0",
     description="Vendor-neutral enterprise AI security control plane",
 )
 
@@ -45,26 +51,128 @@ detection_engine = DetectionEngine()
 repository = Repository()
 
 
-def _require_endpoint_token(authorization: str | None) -> None:
-    """Require a shared endpoint token when MIRA_ENDPOINT_TOKEN is configured.
+def _as_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
-    Authentication is optional for isolated local labs. Shared enterprise development
-    environments should configure MIRA_ENDPOINT_TOKEN and deploy the same value to a
-    managed endpoint through MIRA_AGENT_TOKEN. Per-device enrollment replaces this
-    bootstrap model in a later milestone.
-    """
 
-    expected = os.getenv("MIRA_ENDPOINT_TOKEN")
-    if not expected:
-        return
-    supplied = ""
+def _bearer_token(authorization: str | None) -> str:
     if authorization and authorization.lower().startswith("bearer "):
-        supplied = authorization[7:].strip()
+        return authorization[7:].strip()
+    return ""
+
+
+def _hash_endpoint_token(token: str) -> str:
+    pepper = os.getenv("MIRA_TOKEN_PEPPER", "")
+    if pepper:
+        return hmac.new(pepper.encode(), token.encode(), hashlib.sha256).hexdigest()
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _require_enrollment_token(authorization: str | None) -> None:
+    expected = os.getenv("MIRA_ENROLLMENT_TOKEN")
+    if not expected:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Endpoint enrollment is not configured",
+        )
+    supplied = _bearer_token(authorization)
     if not hmac.compare_digest(supplied, expected):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid Mira Protect enrollment token",
+        )
+
+
+def _require_endpoint_identity(authorization: str | None, device_id: str) -> None:
+    supplied = _bearer_token(authorization)
+    enrolled_hash = repository.get_endpoint_credential_hash(device_id)
+
+    if enrolled_hash:
+        if not supplied or not hmac.compare_digest(_hash_endpoint_token(supplied), enrolled_hash):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid Mira Protect device credential",
+            )
+        repository.touch_endpoint_credential(device_id)
+        return
+
+    shared_expected = os.getenv("MIRA_ENDPOINT_TOKEN")
+    enrollment_configured = bool(os.getenv("MIRA_ENROLLMENT_TOKEN"))
+    allow_shared = _as_bool(
+        os.getenv(
+            "MIRA_ALLOW_SHARED_ENDPOINT_TOKEN",
+            "false" if enrollment_configured else "true",
+        )
+    )
+
+    if shared_expected and allow_shared:
+        if hmac.compare_digest(supplied, shared_expected):
+            return
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid Mira Protect endpoint token",
         )
+
+    if enrollment_configured:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Endpoint is not enrolled",
+        )
+
+    if shared_expected and not hmac.compare_digest(supplied, shared_expected):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid Mira Protect endpoint token",
+        )
+
+
+def _parse_csv_env(name: str) -> list[str]:
+    return sorted(
+        {
+            value.strip().lower()
+            for value in os.getenv(name, "").split(",")
+            if value.strip()
+        }
+    )
+
+
+def _endpoint_policy_bundle() -> EndpointPolicyBundle:
+    refresh_seconds = int(os.getenv("MIRA_POLICY_REFRESH_SECONDS", "300"))
+    refresh_seconds = max(30, min(refresh_seconds, 86400))
+    deny_processes = _parse_csv_env("MIRA_ENDPOINT_DENY_PROCESSES")
+    process_names = _parse_csv_env("MIRA_ENDPOINT_PROCESS_NAMES")
+    command_markers = _parse_csv_env("MIRA_ENDPOINT_COMMAND_MARKERS")
+    fail_closed = _as_bool(os.getenv("MIRA_ENDPOINT_FAIL_CLOSED", "false"))
+    enable_test_controls = _as_bool(os.getenv("MIRA_ENABLE_TEST_CONTROLS", "false"))
+
+    mode_raw = os.getenv("MIRA_ENDPOINT_POLICY_MODE", "").strip().lower()
+    recommended_mode = EnforcementMode(mode_raw) if mode_raw in {"monitor", "guard", "enforce"} else None
+
+    policy_body = {
+        "refresh_seconds": refresh_seconds,
+        "deny_processes": deny_processes,
+        "process_names": process_names,
+        "command_markers": command_markers,
+        "fail_closed": fail_closed,
+        "enable_test_controls": enable_test_controls,
+        "recommended_mode": recommended_mode.value if recommended_mode else None,
+    }
+    policy_version = hashlib.sha256(
+        json.dumps(policy_body, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()[:16]
+
+    return EndpointPolicyBundle(
+        policy_version=policy_version,
+        refresh_seconds=refresh_seconds,
+        deny_processes=deny_processes,
+        process_names=process_names,
+        command_markers=command_markers,
+        fail_closed=fail_closed,
+        enable_test_controls=enable_test_controls,
+        recommended_mode=recommended_mode,
+    )
 
 
 def _process_event(event: AIEvent) -> tuple[AIEvent, list[DetectionFinding]]:
@@ -113,7 +221,7 @@ def health() -> dict[str, str]:
     return {
         "status": "ok" if database == "ok" else "degraded",
         "service": "mira-protect",
-        "version": "0.2.0",
+        "version": "0.3.0",
         "database": database,
     }
 
@@ -185,12 +293,43 @@ def dashboard_summary() -> DashboardSummary:
     )
 
 
+@app.post("/api/v1/endpoint/enroll", response_model=EndpointEnrollmentResponse)
+def endpoint_enroll(
+    enrollment: EndpointEnrollmentRequest,
+    authorization: str | None = Header(default=None),
+) -> EndpointEnrollmentResponse:
+    _require_enrollment_token(authorization)
+
+    device_token = secrets.token_urlsafe(48)
+    repository.save_endpoint_credential(
+        enrollment.device_id,
+        _hash_endpoint_token(device_token),
+    )
+
+    return EndpointEnrollmentResponse(
+        device_id=enrollment.device_id,
+        device_token=device_token,
+        policy_url=f"/api/v1/endpoint/policy/{enrollment.device_id}",
+        message="Endpoint enrolled; store the device credential securely.",
+    )
+
+
+@app.get("/api/v1/endpoint/policy/{device_id}", response_model=EndpointPolicyBundle)
+def endpoint_policy(
+    device_id: str,
+    authorization: str | None = Header(default=None),
+) -> EndpointPolicyBundle:
+    _require_endpoint_identity(authorization, device_id)
+    return _endpoint_policy_bundle()
+
+
 @app.post("/api/v1/endpoint/heartbeat", response_model=AIAsset)
 def endpoint_heartbeat(
     heartbeat: EndpointHeartbeat,
     authorization: str | None = Header(default=None),
 ) -> AIAsset:
-    _require_endpoint_token(authorization)
+    _require_endpoint_identity(authorization, heartbeat.device_id)
+    policy = _endpoint_policy_bundle()
     asset = AIAsset(
         asset_id=uuid5(NAMESPACE_URL, f"mira-protect-device:{heartbeat.device_id}"),
         kind=AssetKind.DEVICE,
@@ -206,6 +345,7 @@ def endpoint_heartbeat(
             "platform": heartbeat.platform,
             "platform_version": heartbeat.platform_version,
             "ip_addresses": heartbeat.ip_addresses,
+            "policy_version": policy.policy_version,
             "last_heartbeat": heartbeat.timestamp.isoformat(),
         },
     )
@@ -225,6 +365,7 @@ def endpoint_heartbeat(
             "platform": heartbeat.platform,
             "platform_version": heartbeat.platform_version,
             "ip_addresses": heartbeat.ip_addresses,
+            "policy_version": policy.policy_version,
         },
     )
     _process_event(event)
@@ -236,7 +377,7 @@ def evaluate_endpoint_process(
     observation: EndpointProcessObservation,
     authorization: str | None = Header(default=None),
 ) -> EndpointDecision:
-    _require_endpoint_token(authorization)
+    _require_endpoint_identity(authorization, observation.device_id)
     provider, product = _infer_process_provider(
         observation.process_name,
         observation.command_line,
@@ -311,7 +452,7 @@ def endpoint_enforcement(
 ) -> AIEvent:
     """Persist endpoint confirmation that a preventative action was attempted."""
 
-    _require_endpoint_token(authorization)
+    _require_endpoint_identity(authorization, report.device_id)
     event = AIEvent(
         event_type=EventType.ENDPOINT_ENFORCEMENT,
         timestamp=report.timestamp,
@@ -335,8 +476,6 @@ def endpoint_enforcement(
             "error": report.error,
         },
     )
-    # An enforcement acknowledgement describes the result of an already-evaluated
-    # decision; re-running it through policy would create a second policy decision.
     event.security.policy_decision = PolicyDecision.BLOCK
     repository.save_event(event)
     return event
