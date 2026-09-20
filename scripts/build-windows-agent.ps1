@@ -159,7 +159,7 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
 
 $buildInfo = [ordered]@{
     product = "Mira Protect Endpoint Agent"
-    version = "0.2.0"
+    version = "0.3.0"
     platform = "windows"
     architecture = $env:PROCESSOR_ARCHITECTURE
     built_at_utc = [DateTime]::UtcNow.ToString("o")
