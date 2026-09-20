@@ -44,6 +44,7 @@ class EventType(str, Enum):
     DETECTION = "ai.detection"
     ASSET_DISCOVERED = "ai.asset_discovered"
     ENDPOINT_PROCESS = "endpoint.process"
+    ENDPOINT_ENROLLMENT = "endpoint.enrollment"
     ENDPOINT_ENFORCEMENT = "endpoint.enforcement"
     ENDPOINT_HEARTBEAT = "endpoint.heartbeat"
 
