@@ -1,11 +1,11 @@
 param(
     [string]$InstallDir = "$env:ProgramData\MiraProtect",
+    [string]$TaskName = "Mira Protect Endpoint Agent",
     [int]$WaitSeconds = 10,
     [switch]$SyntheticEnforcement
 )
 
 $ErrorActionPreference = "Stop"
-$TaskName = "Mira Protect Endpoint Agent"
 $Marker = "--mira-protect-test-block"
 $ConfigPath = Join-Path $InstallDir "agent-config.json"
 
