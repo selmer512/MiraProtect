@@ -7,6 +7,10 @@ param(
 
     [string]$Token = "",
 
+    [string]$EnrollmentToken = "",
+
+    [string]$DeviceId = $env:COMPUTERNAME.ToLowerInvariant(),
+
     [string]$InstallDir = "$env:ProgramData\MiraProtect",
 
     [string]$AgentBinary = "",
@@ -61,6 +65,8 @@ Assert-Administrator
 New-Item -Path $InstallDir -ItemType Directory -Force | Out-Null
 $LogDir = Join-Path $InstallDir "logs"
 New-Item -Path $LogDir -ItemType Directory -Force | Out-Null
+$CredentialPath = Join-Path $InstallDir "device-token.txt"
+$PolicyCachePath = Join-Path $InstallDir "policy-cache.json"
 
 $SourceExecutable = Resolve-AgentExecutable -RequestedBinary $AgentBinary -Root $RepoRoot
 $InstalledExecutable = Join-Path $InstallDir "MiraProtectAgent.exe"
@@ -72,6 +78,10 @@ if ($SourceExecutable -ne $InstalledExecutable) {
 $ConfigPath = Join-Path $InstallDir "agent-config.json"
 $config = @{
     control_plane_url = $ControlPlaneUrl.TrimEnd('/')
+    device_id = $DeviceId
+    credential_path = $CredentialPath
+    policy_cache_path = $PolicyCachePath
+    policy_refresh_seconds = 300
     mode = $Mode
     poll_seconds = 2.0
     heartbeat_seconds = 60.0
@@ -84,8 +94,42 @@ $config = @{
 $config | ConvertTo-Json -Depth 5 | Set-Content -Path $ConfigPath -Encoding UTF8
 
 [Environment]::SetEnvironmentVariable("MIRA_AGENT_CONFIG", $ConfigPath, "Machine")
+[Environment]::SetEnvironmentVariable("MIRA_AGENT_TOKEN", $null, "Machine")
+
+if ($EnrollmentToken) {
+    $headers = @{ Authorization = "Bearer $EnrollmentToken" }
+    $body = @{
+        device_id = $DeviceId
+        hostname = $env:COMPUTERNAME
+        platform = "Windows"
+        platform_version = [Environment]::OSVersion.VersionString
+        agent_version = "0.3.0"
+    } | ConvertTo-Json -Depth 4
+
+    try {
+        $enrollment = Invoke-RestMethod `
+            -Method Post `
+            -Uri "$($ControlPlaneUrl.TrimEnd('/'))/api/v1/endpoint/enroll" `
+            -Headers $headers `
+            -ContentType "application/json" `
+            -Body $body
+        $Token = [string]$enrollment.device_token
+        if (-not $Token) {
+            throw "Control plane returned an empty device credential."
+        }
+        Write-Host "Endpoint enrollment completed for $DeviceId." -ForegroundColor Green
+    }
+    catch {
+        throw "Endpoint enrollment failed: $($_.Exception.Message)"
+    }
+}
+
 if ($Token) {
-    [Environment]::SetEnvironmentVariable("MIRA_AGENT_TOKEN", $Token, "Machine")
+    Set-Content -Path $CredentialPath -Value $Token -Encoding ASCII -NoNewline
+    & icacls.exe $CredentialPath /inheritance:r /grant:r "SYSTEM:F" "BUILTIN\Administrators:F" | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to apply restrictive ACLs to $CredentialPath."
+    }
 }
 
 $RunnerPath = Join-Path $InstallDir "run-agent.ps1"
@@ -93,8 +137,6 @@ $LogPath = Join-Path $LogDir "agent.log"
 $runner = @"
 `$ErrorActionPreference = "Continue"
 `$env:MIRA_AGENT_CONFIG = "$ConfigPath"
-`$machineToken = [Environment]::GetEnvironmentVariable("MIRA_AGENT_TOKEN", "Machine")
-if (`$machineToken) { `$env:MIRA_AGENT_TOKEN = `$machineToken }
 if (Test-Path "$LogPath") {
     `$item = Get-Item "$LogPath"
     if (`$item.Length -gt 20971520) {
@@ -137,8 +179,10 @@ Start-Sleep -Seconds 2
 $task = Get-ScheduledTask -TaskName $TaskName
 Write-Host "Mira Protect endpoint agent installed." -ForegroundColor Green
 Write-Host "Mode:          $Mode"
+Write-Host "Device ID:     $DeviceId"
 Write-Host "Control plane: $ControlPlaneUrl"
 Write-Host "Install path:  $InstallDir"
+Write-Host "Policy cache:  $PolicyCachePath"
 Write-Host "Task state:    $($task.State)"
 Write-Host "Agent log:     $LogPath"
 Write-Host ""
