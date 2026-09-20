@@ -284,11 +284,12 @@ class EndpointHeartbeat(BaseModel):
     device_id: str
     hostname: str
     username: str | None = None
-    agent_version: str = "0.2.0"
+    agent_version: str = "0.3.0"
     mode: EnforcementMode = EnforcementMode.MONITOR
     platform: str
     platform_version: str | None = None
     ip_addresses: list[str] = Field(default_factory=list)
+    policy_version: str | None = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -304,7 +305,7 @@ class EndpointEnforcementReport(BaseModel):
     action: str
     result: EnforcementResult
     mode: EnforcementMode
-    agent_version: str = "0.2.0"
+    agent_version: str = "0.3.0"
     reason: str | None = None
     error: str | None = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
