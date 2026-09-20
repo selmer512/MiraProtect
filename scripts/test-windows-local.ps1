@@ -56,6 +56,14 @@ if (-not $SkipBuild) {
     }
 }
 
+$BuildInfoPath = Join-Path $RepoRoot "dist\windows\BUILD-INFO.json"
+if (Test-Path $BuildInfoPath) {
+    $BuildInfo = Get-Content $BuildInfoPath -Raw | ConvertFrom-Json
+    if ($BuildInfo.agent_executable -and (Test-Path $BuildInfo.agent_executable)) {
+        $AgentExe = [string]$BuildInfo.agent_executable
+    }
+}
+
 foreach ($required in @($AgentExe, $ServerExe, $CliExe)) {
     if (-not (Test-Path $required)) {
         throw "Required test component was not found: $required"
