@@ -1,10 +1,10 @@
 param(
     [string]$InstallDir = "$env:ProgramData\MiraProtect",
+    [string]$TaskName = "Mira Protect Endpoint Agent",
     [switch]$PreserveLogs
 )
 
 $ErrorActionPreference = "Stop"
-$TaskName = "Mira Protect Endpoint Agent"
 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = New-Object Security.Principal.WindowsPrincipal($identity)
