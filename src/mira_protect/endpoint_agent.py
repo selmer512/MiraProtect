@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -180,15 +181,11 @@ def _write_secret(path: str, value: str) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_suffix(destination.suffix + ".tmp")
     temporary.write_text(value + "\n", encoding="utf-8")
-    try:
+    with contextlib.suppress(OSError):
         os.chmod(temporary, 0o600)
-    except OSError:
-        pass
     os.replace(temporary, destination)
-    try:
+    with contextlib.suppress(OSError):
         os.chmod(destination, 0o600)
-    except OSError:
-        pass
 
 
 def _sha256(path: str | None, max_bytes: int) -> str | None:
