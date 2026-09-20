@@ -25,29 +25,44 @@ function Assert-LastExitCode {
 }
 
 function Resolve-BasePython {
-    $py = Get-Command py -ErrorAction SilentlyContinue
-    if ($py) {
-        & $py.Source -3.12 -c "import sys; raise SystemExit(0 if sys.version_info >= (3,12) else 1)" 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            return @{
-                Exe = $py.Source
-                Prefix = @("-3.12")
-            }
-        }
-    }
-
+    # Prefer an actual python.exe on PATH. The Windows Python launcher (py.exe)
+    # may be installed even when no runtime exists, and probing it under
+    # $ErrorActionPreference = "Stop" can abort the build before we can fall back.
     $python = Get-Command python -ErrorAction SilentlyContinue
     if ($python) {
-        & $python.Source -c "import sys; raise SystemExit(0 if sys.version_info >= (3,12) else 1)" 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            return @{
-                Exe = $python.Source
-                Prefix = @()
+        try {
+            & $python.Source -c "import sys; raise SystemExit(0 if sys.version_info >= (3,12) else 1)" 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                return @{
+                    Exe = $python.Source
+                    Prefix = @()
+                }
             }
+        }
+        catch {
+            # Continue to the launcher probe below.
         }
     }
 
-    throw "Python 3.12+ was not found. Install Python 3.12 or newer and retry."
+    $py = Get-Command py -ErrorAction SilentlyContinue
+    if ($py) {
+        try {
+            # -3 selects the newest installed Python 3 runtime rather than requiring
+            # exactly Python 3.12. Any Python >=3.12 is supported by Mira Protect.
+            & $py.Source -3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3,12) else 1)" 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                return @{
+                    Exe = $py.Source
+                    Prefix = @("-3")
+                }
+            }
+        }
+        catch {
+            # Fall through to the actionable error below.
+        }
+    }
+
+    throw "Python 3.12+ was not found. Install 64-bit Python 3.12 or newer, ensure 'python' or 'py' can launch it, then retry."
 }
 
 $basePython = Resolve-BasePython
