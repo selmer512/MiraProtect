@@ -407,6 +407,13 @@ def revoke_endpoint(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Managed endpoint credential was not found",
         )
+
+    event = AIEvent(
+        event_type=EventType.ENDPOINT_CREDENTIAL_REVOKED,
+        actor=Actor(device_id=device_id, identity=device_id),
+        metadata={"device_id": device_id, "credential_type": "per-device-bearer"},
+    )
+    repository.save_event(event)
     return {"device_id": device_id, "revoked": True}
 
 
