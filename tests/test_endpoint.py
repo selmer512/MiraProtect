@@ -497,3 +497,23 @@ def test_agent_requires_complete_mtls_client_identity(tmp_path, monkeypatch) -> 
 
     with pytest.raises(ValueError, match="must be configured together"):
         AgentConfig.load()
+
+
+def test_agent_rejects_mtls_when_tls_verification_is_disabled(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "agent-config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "control_plane_url": "https://mira-protect.example.corp",
+                "mode": "monitor",
+                "tls_verify": False,
+                "tls_client_cert": "client-cert.pem",
+                "tls_client_key": "client-key.pem",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MIRA_AGENT_CONFIG", str(config_path))
+
+    with pytest.raises(ValueError, match="requires tls_verify"):
+        AgentConfig.load()
