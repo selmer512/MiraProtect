@@ -159,18 +159,35 @@ try {
 
     Wait-ForCondition -Attempts 80 -FailureMessage "TLS/mTLS control plane did not become ready." -Condition {
         if ($serverProcess.HasExited) { return $false }
-        & $CliExe --url $ControlPlaneUrl --ca-file $CaFile --client-cert $ClientCert --client-key $ClientKey --json ready *> $null
-        return $LASTEXITCODE -eq 0
+        try {
+            & $CliExe --url $ControlPlaneUrl --ca-file $CaFile --client-cert $ClientCert --client-key $ClientKey --json ready *> $null
+            return $LASTEXITCODE -eq 0
+        }
+        catch {
+            return $false
+        }
     }
     Write-Host "[PASS] Direct TLS control plane is reachable with a trusted client certificate" -ForegroundColor Green
 
-    & $CliExe --url $ControlPlaneUrl --ca-file $CaFile ready *> $NoClientLog
-    $noClientExit = $LASTEXITCODE
+    $noClientExit = 1
+    try {
+        & $CliExe --url $ControlPlaneUrl --ca-file $CaFile ready *> $NoClientLog
+        $noClientExit = $LASTEXITCODE
+    }
+    catch {
+        $_ | Out-String | Add-Content -Path $NoClientLog
+        $noClientExit = 1
+    }
     if ($noClientExit -eq 0) { throw "mTLS control plane accepted a client without a certificate." }
     Write-Host "[PASS] mTLS rejects clients without a certificate" -ForegroundColor Green
 
-    & $CliExe --url $ControlPlaneUrl --token $AdminToken --ca-file $CaFile --client-cert $ClientCert --client-key $ClientKey --json assets *> $null
-    if ($LASTEXITCODE -ne 0) { throw "Authenticated administrative API failed over direct TLS/mTLS." }
+    try {
+        & $CliExe --url $ControlPlaneUrl --token $AdminToken --ca-file $CaFile --client-cert $ClientCert --client-key $ClientKey --json assets *> $null
+        if ($LASTEXITCODE -ne 0) { throw "CLI exit code $LASTEXITCODE" }
+    }
+    catch {
+        throw "Authenticated administrative API failed over direct TLS/mTLS: $($_.Exception.Message)"
+    }
     Write-Host "[PASS] Administrative API authentication works over TLS/mTLS" -ForegroundColor Green
 
     Write-Host "Installing managed Windows endpoint against the TLS/mTLS control plane..." -ForegroundColor Cyan
