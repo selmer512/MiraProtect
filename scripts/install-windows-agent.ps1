@@ -160,7 +160,7 @@ if ($EnrollmentToken) {
         hostname = $env:COMPUTERNAME
         platform = "Windows"
         platform_version = [Environment]::OSVersion.VersionString
-        agent_version = "0.3.0"
+        agent_version = "0.4.0"
     } | ConvertTo-Json -Depth 4
 
     try {
