@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 
+import pytest
+
 os.environ.setdefault("MIRA_DATABASE_URL", "sqlite+pysqlite:///:memory:")
 os.environ.setdefault("MIRA_ENABLE_TEST_CONTROLS", "true")
 
@@ -459,3 +461,39 @@ def test_agent_config_accepts_utf8_bom(tmp_path, monkeypatch) -> None:
 
     assert config.control_plane_url == "http://127.0.0.1:8080"
     assert config.mode == "monitor"
+
+
+def test_agent_rejects_http_when_https_is_required(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "agent-config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "control_plane_url": "http://10.10.10.10:8080",
+                "mode": "monitor",
+                "require_https": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MIRA_AGENT_CONFIG", str(config_path))
+
+    with pytest.raises(ValueError, match="HTTPS is required"):
+        AgentConfig.load()
+
+
+def test_agent_requires_complete_mtls_client_identity(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "agent-config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "control_plane_url": "https://mira-protect.example.corp",
+                "mode": "monitor",
+                "tls_client_cert": "client-cert.pem",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MIRA_AGENT_CONFIG", str(config_path))
+
+    with pytest.raises(ValueError, match="must be configured together"):
+        AgentConfig.load()
