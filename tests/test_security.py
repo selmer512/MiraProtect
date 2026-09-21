@@ -20,12 +20,14 @@ def _configure_development_security(monkeypatch) -> None:
     monkeypatch.setenv("MIRA_TOKEN_PEPPER", "development-pepper")
     monkeypatch.setenv("MIRA_ADMIN_TOKEN", "development-admin")
     monkeypatch.setenv("MIRA_ALLOW_SHARED_ENDPOINT_TOKEN", "false")
+    monkeypatch.setenv("MIRA_TLS_TERMINATED_UPSTREAM", "true")
     monkeypatch.delenv("MIRA_ENDPOINT_TOKEN", raising=False)
 
 
 def test_development_profile_reports_missing_security_requirements(monkeypatch) -> None:
     monkeypatch.setenv("MIRA_SECURITY_PROFILE", "development")
     monkeypatch.setenv("MIRA_BIND_HOST", "0.0.0.0")
+    monkeypatch.setenv("MIRA_TLS_TERMINATED_UPSTREAM", "false")
 
     status = security_status()
 
@@ -49,6 +51,7 @@ def test_development_profile_accepts_upstream_tls(monkeypatch) -> None:
 
 def test_remote_development_server_requires_tls_by_default(monkeypatch) -> None:
     _configure_development_security(monkeypatch)
+    monkeypatch.setenv("MIRA_TLS_TERMINATED_UPSTREAM", "false")
 
     with pytest.raises(RuntimeError, match="tls_configured"):
         validate_server_security(
@@ -70,6 +73,7 @@ def test_production_profile_never_accepts_insecure_remote_override(monkeypatch) 
     _configure_development_security(monkeypatch)
     monkeypatch.setenv("MIRA_SECURITY_PROFILE", "production")
     monkeypatch.setenv("MIRA_ALLOW_INSECURE_REMOTE", "true")
+    monkeypatch.setenv("MIRA_TLS_TERMINATED_UPSTREAM", "false")
 
     with pytest.raises(RuntimeError, match="tls_configured"):
         validate_server_security(
