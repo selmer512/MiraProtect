@@ -7,7 +7,8 @@ import os
 import secrets
 from uuid import NAMESPACE_URL, uuid5
 
-from fastapi import FastAPI, Header, HTTPException, Query, status
+from fastapi import FastAPI, Header, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse
 
 from .catalog import get_catalog
 from .detection import DetectionEngine
@@ -50,6 +51,21 @@ risk_engine = RiskEngine()
 policy_engine = PolicyEngine()
 detection_engine = DetectionEngine()
 repository = Repository()
+
+
+@app.middleware("http")
+async def enforce_security_readiness(request: Request, call_next):
+    if request.url.path not in {"/health", "/ready"}:
+        posture = security_status()
+        if security_profile() != "local" and not posture["ready"]:
+            return JSONResponse(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                content={
+                    "detail": "Mira Protect security profile is not ready",
+                    "missing_requirements": posture["missing_requirements"],
+                },
+            )
+    return await call_next(request)
 
 
 def _as_bool(value: object) -> bool:
