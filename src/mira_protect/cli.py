@@ -90,6 +90,12 @@ def _command_health(args: argparse.Namespace) -> int:
     return 0
 
 
+def _command_ready(args: argparse.Namespace) -> int:
+    ready = _get(args, "/ready")
+    _emit(ready, args.json)
+    return 0 if ready.get("status") == "ready" else 1
+
+
 def _command_summary(args: argparse.Namespace) -> int:
     _emit(_get(args, "/api/v1/dashboard/summary"), args.json)
     return 0
@@ -124,8 +130,14 @@ def _command_doctor(args: argparse.Namespace) -> int:
     }
     try:
         health = _get(args, "/health")
+        readiness = _get(args, "/ready")
         report["health"] = health
-        report["ready"] = health.get("status") == "ok" and health.get("database") == "ok"
+        report["readiness"] = readiness
+        report["ready"] = (
+            health.get("status") == "ok"
+            and health.get("database") == "ok"
+            and readiness.get("status") == "ready"
+        )
     except Exception as exc:
         report["ready"] = False
         report["error"] = str(exc)
@@ -212,6 +224,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     commands = {
         "health": ("Show control-plane health", _command_health),
+        "ready": ("Show database and security-profile readiness", _command_ready),
         "summary": ("Show dashboard summary", _command_summary),
         "assets": ("List discovered/managed assets", _command_assets),
         "threats": ("List COMPASS-aligned threat catalog", _command_threats),
