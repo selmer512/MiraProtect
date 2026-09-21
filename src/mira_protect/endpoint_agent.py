@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 import httpx
 import psutil
 
-AGENT_VERSION = "0.3.0"
+AGENT_VERSION = "0.4.0"
 TEST_BLOCK_MARKER = "--mira-protect-test-block"
 
 DEFAULT_AI_PROCESS_NAMES = {
