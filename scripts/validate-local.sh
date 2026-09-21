@@ -43,6 +43,7 @@ source "$VENV_DIR/bin/activate"
 python -m pip install --upgrade pip >/dev/null
 python -m pip install -e "$ROOT_DIR[dev]" >/dev/null
 
+export MIRA_SECURITY_PROFILE="local"
 export MIRA_DATABASE_URL="sqlite+pysqlite:///:memory:"
 
 printf '\n== Ruff ==\n'
