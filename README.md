@@ -10,7 +10,7 @@ The architecture is guided by the OWASP GenAI COMPASS Observe -> Orient -> Decid
 
 ## Current milestone
 
-The project is at an **enterprise development alpha / secure control-plane milestone (0.4.0)** stage. The native Windows protection loop and persistent managed Windows monitor milestone have both passed on Windows. Development is now focused on authenticated remote control-plane operation, TLS/mTLS transport, endpoint credential lifecycle, and production-readiness enforcement.
+The project is at an **enterprise development alpha / TLS-mTLS transport milestone (0.4.0)** stage. The native Windows protection loop, persistent managed Windows monitor milestone, and secure control-plane authentication/revocation milestone have passed on Windows. Development is now validating a real certificate-backed HTTPS/mTLS control plane with the persistent Windows endpoint.
 
 ## Architecture
 
@@ -135,6 +135,19 @@ Direct TLS is supported with MIRA_TLS_CERT_FILE and MIRA_TLS_KEY_FILE. Optional 
 
 Managed Windows endpoints require HTTPS for non-loopback control planes unless the installer is explicitly invoked with -AllowInsecureHttp for an isolated development network. Endpoint configuration supports a custom CA bundle and an optional client certificate/key pair.
 
+## TLS/mTLS transport acceptance
+
+The secure control-plane authentication/revocation milestone has passed on Windows. The next acceptance gate exercises the actual TLS stack rather than only configuration enforcement.
+
+From elevated Windows PowerShell:
+
+    git pull
+    powershell -ExecutionPolicy Bypass -File .\scripts\test-windows-tls-mtls.ps1
+
+The harness generates a short-lived local test CA, server certificate, and client certificate; starts the control plane with direct TLS and required client certificates; proves a client without a certificate is rejected; verifies the administrative API over mTLS; installs the Windows endpoint as SYSTEM; enrolls it through the agent's TLS stack; downloads the versioned policy; and verifies the persistent endpoint heartbeat over mutual TLS.
+
+Evidence is written under .mira-test-tls-mtls. Ephemeral private keys are removed during normal cleanup and the entire test directory is ignored by Git.
+
 ## Secondary test: Linux CLI protection
 
 The Linux CLI harness remains available for cross-platform development validation:
@@ -240,6 +253,8 @@ scripts/
   test-windows-local.ps1
   test-windows-managed-monitor.ps1
   test-control-plane-security.ps1
+  test-windows-tls-mtls.ps1
+  generate-test-pki.py
   windows_agent_entry.py
   validate-local.sh
   test-linux-cli.sh
