@@ -41,7 +41,7 @@ def _client(args: argparse.Namespace) -> httpx.Client:
         or os.getenv("MIRA_AGENT_TOKEN")
         or os.getenv("MIRA_ENDPOINT_TOKEN")
     )
-    headers = {"User-Agent": "MiraProtectCLI/0.3.0"}
+    headers = {"User-Agent": "MiraProtectCLI/0.4.0"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
     return httpx.Client(
