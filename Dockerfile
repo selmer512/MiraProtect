@@ -8,6 +8,8 @@ COPY src ./src
 RUN pip install --no-cache-dir .
 
 ENV PYTHONPATH=/app/src
+ENV MIRA_BIND_HOST=0.0.0.0
+ENV MIRA_BIND_PORT=8080
 EXPOSE 8080
 
-CMD ["mira-protect-server", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["mira-protect-server"]
