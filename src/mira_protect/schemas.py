@@ -45,6 +45,7 @@ class EventType(str, Enum):
     ASSET_DISCOVERED = "ai.asset_discovered"
     ENDPOINT_PROCESS = "endpoint.process"
     ENDPOINT_ENROLLMENT = "endpoint.enrollment"
+    ENDPOINT_CREDENTIAL_REVOKED = "endpoint.credential_revoked"
     ENDPOINT_ENFORCEMENT = "endpoint.enforcement"
     ENDPOINT_HEARTBEAT = "endpoint.heartbeat"
 
@@ -226,7 +227,7 @@ class EndpointEnrollmentRequest(BaseModel):
     hostname: str
     platform: str
     platform_version: str | None = None
-    agent_version: str = "0.3.0"
+    agent_version: str = "0.4.0"
 
 
 class EndpointEnrollmentResponse(BaseModel):
@@ -268,7 +269,7 @@ class EndpointProcessObservation(BaseModel):
     executable_sha256: str | None = None
     started_at: datetime | None = None
     observed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    agent_version: str = "0.3.0"
+    agent_version: str = "0.4.0"
     mode: EnforcementMode = EnforcementMode.MONITOR
     matched_local_rules: list[str] = Field(default_factory=list)
     attributes: dict[str, Any] = Field(default_factory=dict)
@@ -287,7 +288,7 @@ class EndpointHeartbeat(BaseModel):
     device_id: str
     hostname: str
     username: str | None = None
-    agent_version: str = "0.3.0"
+    agent_version: str = "0.4.0"
     mode: EnforcementMode = EnforcementMode.MONITOR
     platform: str
     platform_version: str | None = None
@@ -308,7 +309,7 @@ class EndpointEnforcementReport(BaseModel):
     action: str
     result: EnforcementResult
     mode: EnforcementMode
-    agent_version: str = "0.3.0"
+    agent_version: str = "0.4.0"
     reason: str | None = None
     error: str | None = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
