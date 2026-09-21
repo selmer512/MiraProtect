@@ -34,3 +34,10 @@ dist/
 .DS_Store
 
 .mira-test-control-plane-security/
+
+deploy/tls/*.crt
+deploy/tls/*.cer
+deploy/tls/*.pem
+deploy/tls/*.key
+deploy/tls/*.pfx
+deploy/tls/*.p12
