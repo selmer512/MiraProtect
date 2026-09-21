@@ -154,35 +154,38 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 # Avoid machine-wide environment variables so isolated/test installs cannot affect other agents.
 
 if ($EnrollmentToken) {
-    $headers = @{ Authorization = "Bearer $EnrollmentToken" }
-    $body = @{
-        device_id = $DeviceId
-        hostname = $env:COMPUTERNAME
-        platform = "Windows"
-        platform_version = [Environment]::OSVersion.VersionString
-        agent_version = "0.4.0"
-    } | ConvertTo-Json -Depth 4
-
+    # Use the agent's own TLS stack for enrollment so custom CAs and optional
+    # client certificates work consistently. The bootstrap token exists only
+    # in this installer process and is never written to the endpoint config.
+    Remove-Item $CredentialPath -Force -ErrorAction SilentlyContinue
+    $previousAgentConfig = $env:MIRA_AGENT_CONFIG
+    $previousEnrollmentToken = $env:MIRA_ENROLLMENT_TOKEN
+    $previousAgentToken = $env:MIRA_AGENT_TOKEN
     try {
-        $enrollment = Invoke-RestMethod `
-            -Method Post `
-            -Uri "$($ControlPlaneUrl.TrimEnd('/'))/api/v1/endpoint/enroll" `
-            -Headers $headers `
-            -ContentType "application/json" `
-            -Body $body
-        $Token = [string]$enrollment.device_token
-        if (-not $Token) {
-            throw "Control plane returned an empty device credential."
+        $env:MIRA_AGENT_CONFIG = $ConfigPath
+        $env:MIRA_ENROLLMENT_TOKEN = $EnrollmentToken
+        $env:MIRA_AGENT_TOKEN = ""
+        & $InstalledExecutable --enroll-only
+        if ($LASTEXITCODE -ne 0) {
+            throw "Endpoint enrollment command failed with exit code $LASTEXITCODE."
         }
-        Write-Host "Endpoint enrollment completed for $DeviceId." -ForegroundColor Green
     }
-    catch {
-        throw "Endpoint enrollment failed: $($_.Exception.Message)"
+    finally {
+        $env:MIRA_AGENT_CONFIG = $previousAgentConfig
+        $env:MIRA_ENROLLMENT_TOKEN = $previousEnrollmentToken
+        $env:MIRA_AGENT_TOKEN = $previousAgentToken
     }
+
+    if (-not (Test-Path $CredentialPath)) {
+        throw "Endpoint enrollment completed without creating $CredentialPath."
+    }
+    Write-Host "Endpoint enrollment completed for $DeviceId." -ForegroundColor Green
+}
+elseif ($Token) {
+    Set-Content -Path $CredentialPath -Value $Token -Encoding ASCII -NoNewline
 }
 
-if ($Token) {
-    Set-Content -Path $CredentialPath -Value $Token -Encoding ASCII -NoNewline
+if (Test-Path $CredentialPath) {
     & icacls.exe $CredentialPath /inheritance:r /grant:r "SYSTEM:F" "BUILTIN\Administrators:F" | Out-Null
     if ($LASTEXITCODE -ne 0) {
         throw "Unable to apply restrictive ACLs to $CredentialPath."
