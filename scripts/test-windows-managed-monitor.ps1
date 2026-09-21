@@ -21,6 +21,9 @@ $CredentialPath = Join-Path $InstallDir "device-token.txt"
 $PolicyCachePath = Join-Path $InstallDir "policy-cache.json"
 $AgentLog = Join-Path $InstallDir "logs\agent.log"
 $ReportPath = Join-Path $TestRoot "validation-report.json"
+$EvidenceAgentLog = Join-Path $TestRoot "agent.log"
+$EvidencePolicy = Join-Path $TestRoot "policy-cache.json"
+$EvidenceConfig = Join-Path $TestRoot "agent-config.json"
 
 $serverProcess = $null
 $targetProcess = $null
@@ -236,13 +239,15 @@ try {
     }
     Write-Host "[PASS] Inventory records the endpoint applied policy version" -ForegroundColor Green
 
-    $evidenceAgentLog = Join-Path $TestRoot "agent.log"
-    $evidencePolicy = Join-Path $TestRoot "policy-cache.json"
     if (Test-Path $AgentLog) {
-        Copy-Item $AgentLog $evidenceAgentLog -Force
+        Copy-Item $AgentLog $EvidenceAgentLog -Force
     }
     if (Test-Path $PolicyCachePath) {
-        Copy-Item $PolicyCachePath $evidencePolicy -Force
+        Copy-Item $PolicyCachePath $EvidencePolicy -Force
+    }
+    $ConfigPath = Join-Path $InstallDir "agent-config.json"
+    if (Test-Path $ConfigPath) {
+        Copy-Item $ConfigPath $EvidenceConfig -Force
     }
     $sha256 = [Security.Cryptography.SHA256]::Create()
     try {
@@ -295,11 +300,23 @@ try {
     Write-Host ""
     Write-Host "[PASS] Mira Protect managed Windows monitor milestone completed." -ForegroundColor Green
     Write-Host "Validation report: $ReportPath"
-    Write-Host "Agent log:        $evidenceAgentLog"
-    Write-Host "Policy cache:     $evidencePolicy"
+    Write-Host "Agent log:        $EvidenceAgentLog"
+    Write-Host "Policy cache:     $EvidencePolicy"
 }
 finally {
     Stop-TestProcess $targetProcess
+
+    # Preserve diagnostic evidence before removing the isolated managed installation.
+    if (Test-Path $AgentLog) {
+        Copy-Item $AgentLog $EvidenceAgentLog -Force -ErrorAction SilentlyContinue
+    }
+    if (Test-Path $PolicyCachePath) {
+        Copy-Item $PolicyCachePath $EvidencePolicy -Force -ErrorAction SilentlyContinue
+    }
+    $ConfigPath = Join-Path $InstallDir "agent-config.json"
+    if (Test-Path $ConfigPath) {
+        Copy-Item $ConfigPath $EvidenceConfig -Force -ErrorAction SilentlyContinue
+    }
 
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
         try {
