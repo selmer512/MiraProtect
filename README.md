@@ -10,7 +10,7 @@ The architecture is guided by the OWASP GenAI COMPASS Observe -> Orient -> Decid
 
 ## Current milestone
 
-The project is at an **enterprise development alpha / managed Windows monitor milestone** stage. The native Windows protection loop has passed its first local end-to-end test; the current milestone adds persistent SYSTEM deployment, per-device enrollment, versioned central policy, and local policy caching.
+The project is at an **enterprise development alpha / secure control-plane milestone (0.4.0)** stage. The native Windows protection loop and persistent managed Windows monitor milestone have both passed on Windows. Development is now focused on authenticated remote control-plane operation, TLS/mTLS transport, endpoint credential lifecycle, and production-readiness enforcement.
 
 ## Architecture
 
@@ -56,6 +56,12 @@ Endpoint / Browser / SaaS / Network / Identity / Cloud / AI telemetry
 - Endpoint executable hashing
 - Managed endpoint heartbeat and device inventory
 - Per-device bootstrap enrollment and device-scoped credentials
+- Endpoint credential revocation with audit evidence
+- Security profiles for local, development, and production control planes
+- Separate administrative API bearer authentication
+- TLS server support and optional mutual TLS client-certificate enforcement
+- Endpoint certificate verification, custom CA, and mTLS client identity support
+- Remote Windows installer guardrail requiring HTTPS by default
 - Versioned centralized endpoint policy distribution and local policy cache
 - `monitor`, `guard`, and `enforce` endpoint modes
 - Central endpoint deny policy
@@ -73,6 +79,7 @@ Endpoint / Browser / SaaS / Network / Identity / Cloud / AI telemetry
 | Method | Endpoint | Purpose |
 |---|---|---|
 | GET | `/health` | Service/database health |
+| GET | `/ready` | Database and security-profile readiness |
 | POST | `/api/v1/assets` | Register an AI-related asset |
 | GET | `/api/v1/assets` | List known AI assets |
 | POST | `/api/v1/events` | Ingest and evaluate normalized AI telemetry |
@@ -83,6 +90,7 @@ Endpoint / Browser / SaaS / Network / Identity / Cloud / AI telemetry
 | POST | `/api/v1/risk/score` | Calculate contextual AI risk |
 | POST | `/api/v1/endpoint/enroll` | Exchange a bootstrap token for a per-device credential |
 | GET | `/api/v1/endpoint/policy/{device_id}` | Retrieve authenticated versioned endpoint policy |
+| POST | `/api/v1/endpoint/revoke/{device_id}` | Revoke a device credential (admin) |
 | POST | `/api/v1/endpoint/heartbeat` | Register/update a managed endpoint |
 | POST | `/api/v1/endpoint/process/evaluate` | Evaluate an endpoint process and return enforcement action |
 
@@ -108,9 +116,24 @@ After pulling the latest branch, open Windows PowerShell as Administrator and ru
 
     powershell -ExecutionPolicy Bypass -File .\scripts\test-windows-managed-monitor.ps1
 
-This isolated harness rebuilds the 0.3 endpoint, starts an enrollment-enabled control plane, installs the compiled agent as a persistent SYSTEM scheduled task, exchanges a bootstrap enrollment token for a per-device credential, downloads/caches versioned policy, and validates a centrally denied Notepad process in monitor mode. The control plane must record BLOCK while Notepad remains running.
+This isolated harness rebuilds the endpoint, starts an enrollment-enabled control plane, installs the compiled agent as a persistent SYSTEM scheduled task, exchanges a bootstrap enrollment token for a per-device credential, downloads/caches versioned policy, and validates a centrally denied Notepad process in monitor mode. This milestone has passed on Windows: the control plane recorded BLOCK while Notepad remained running.
 
 The milestone report is written to .mira-test-managed-windows\validation-report.json. The isolated scheduled task and ProgramData test directory are removed during cleanup.
+
+## Secure control-plane milestone
+
+Mira Protect 0.4.0 adds secure deployment controls before a remote development control plane is introduced.
+
+From elevated Windows PowerShell:
+
+    git pull
+    powershell -ExecutionPolicy Bypass -File .\scripts\test-control-plane-security.ps1
+
+The harness rebuilds and validates the project, proves a development-profile server refuses an insecure remote bind, verifies readiness checks, confirms the enrollment token cannot access administrative APIs, validates the separate admin credential, enrolls a device, revokes its credential, verifies the revoked credential is rejected, and confirms revocation evidence is persisted.
+
+Direct TLS is supported with MIRA_TLS_CERT_FILE and MIRA_TLS_KEY_FILE. Optional mTLS uses MIRA_TLS_CLIENT_CA_FILE plus MIRA_TLS_REQUIRE_CLIENT_CERT=true. Approved reverse-proxy TLS termination can be declared with MIRA_TLS_TERMINATED_UPSTREAM=true.
+
+Managed Windows endpoints require HTTPS for non-loopback control planes unless the installer is explicitly invoked with -AllowInsecureHttp for an isolated development network. Endpoint configuration supports a custom CA bundle and an optional client certificate/key pair.
 
 ## Secondary test: Linux CLI protection
 
@@ -158,7 +181,8 @@ mira-protect-agent
 
 ```bash
 cp .env.example .env
-# Replace the example endpoint token before using a shared development environment.
+# Configure enrollment, admin, and credential-pepper secrets before using a shared development environment.
+# Set MIRA_SECURITY_PROFILE=development or production for non-local deployments.
 docker compose up --build
 ```
 
@@ -183,10 +207,9 @@ Enterprise rollout should progress from monitor -> guard -> enforce after teleme
 
 ## Next commercial-development milestones
 
-- TLS/mTLS deployment configuration and certificate-based device identity
+- Certificate-backed device identity beyond bearer-token enrollment
 - Signed policy/update artifacts and policy provenance
-- TLS/mTLS deployment configuration
-- RBAC for administrative APIs
+- Role-based administrative API authorization beyond the current separate admin credential
 - Database migrations
 - Linux service packaging and Windows managed packaging
 - Expanded endpoint/network/browser discovery
@@ -201,7 +224,8 @@ Enterprise rollout should progress from monitor -> guard -> enforce after teleme
 src/mira_protect/
   app.py             FastAPI control plane
   cli.py             operator/development CLI
-  server.py          local control-plane launcher
+  server.py          security-aware control-plane launcher
+  security.py        deployment security profiles/readiness
   schemas.py         normalized domain/event models
   risk.py            AI risk engine
   policy.py          policy evaluation engine
@@ -215,6 +239,7 @@ scripts/
   build-windows-agent.ps1
   test-windows-local.ps1
   test-windows-managed-monitor.ps1
+  test-control-plane-security.ps1
   windows_agent_entry.py
   validate-local.sh
   test-linux-cli.sh
