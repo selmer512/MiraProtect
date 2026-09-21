@@ -747,6 +747,27 @@ def main() -> None:
         _log("configuration_error", error=str(exc))
         raise SystemExit(2) from exc
 
+    if "--enroll-only" in sys.argv:
+        agent = EndpointAgent(config)
+        try:
+            if not agent.enroll():
+                _log("enrollment_command_failed", device_id=config.device_id)
+                raise SystemExit(1)
+            if not agent.refresh_policy(force=True):
+                _log(
+                    "enrollment_policy_refresh_failed",
+                    device_id=config.device_id,
+                )
+                raise SystemExit(1)
+            _log(
+                "enrollment_command_completed",
+                device_id=config.device_id,
+                policy_version=agent.policy_version,
+            )
+        finally:
+            agent.close()
+        return
+
     if "--once" in sys.argv:
         agent = EndpointAgent(config)
         try:
