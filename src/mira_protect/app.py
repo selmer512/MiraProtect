@@ -14,6 +14,7 @@ from .detection import DetectionEngine
 from .policy import PolicyEngine
 from .repository import Repository
 from .risk import RiskEngine
+from .security import security_profile, security_status
 from .schemas import (
     AIAsset,
     AIContext,
@@ -68,6 +69,24 @@ def _hash_endpoint_token(token: str) -> str:
     if pepper:
         return hmac.new(pepper.encode(), token.encode(), hashlib.sha256).hexdigest()
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _require_admin_token(authorization: str | None) -> None:
+    expected = os.getenv("MIRA_ADMIN_TOKEN")
+    if not expected:
+        if security_profile() == "local":
+            return
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Administrative API authentication is not configured",
+        )
+
+    supplied = _bearer_token(authorization)
+    if not supplied or not hmac.compare_digest(supplied, expected):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid Mira Protect administrative token",
+        )
 
 
 def _require_enrollment_token(authorization: str | None) -> None:
@@ -226,44 +245,82 @@ def health() -> dict[str, str]:
     }
 
 
+@app.get("/ready")
+def ready() -> dict[str, object]:
+    database_ready = repository.health()
+    security = security_status()
+    return {
+        "status": "ready" if database_ready and security["ready"] else "not_ready",
+        "database": "ok" if database_ready else "unavailable",
+        "security": security,
+    }
+
+
 @app.post("/api/v1/assets", response_model=AIAsset)
-def register_asset(asset: AIAsset) -> AIAsset:
+def register_asset(
+    asset: AIAsset,
+    authorization: str | None = Header(default=None),
+) -> AIAsset:
+    _require_admin_token(authorization)
     return repository.save_asset(asset)
 
 
 @app.get("/api/v1/assets", response_model=list[AIAsset])
-def list_assets() -> list[AIAsset]:
+def list_assets(authorization: str | None = Header(default=None)) -> list[AIAsset]:
+    _require_admin_token(authorization)
     return repository.list_assets()
 
 
 @app.post("/api/v1/risk/score", response_model=RiskResult)
-def score_risk(factors: RiskFactors) -> RiskResult:
+def score_risk(
+    factors: RiskFactors,
+    authorization: str | None = Header(default=None),
+) -> RiskResult:
+    _require_admin_token(authorization)
     return risk_engine.score(factors)
 
 
 @app.post("/api/v1/events", response_model=AIEvent)
-def ingest_event(event: AIEvent) -> AIEvent:
+def ingest_event(
+    event: AIEvent,
+    authorization: str | None = Header(default=None),
+) -> AIEvent:
+    _require_admin_token(authorization)
     processed, _ = _process_event(event)
     return processed
 
 
 @app.get("/api/v1/events", response_model=list[AIEvent])
-def list_events(limit: int = Query(default=200, ge=1, le=2000)) -> list[AIEvent]:
+def list_events(
+    limit: int = Query(default=200, ge=1, le=2000),
+    authorization: str | None = Header(default=None),
+) -> list[AIEvent]:
+    _require_admin_token(authorization)
     return repository.list_events(limit=limit)
 
 
 @app.get("/api/v1/findings", response_model=list[DetectionFinding])
-def list_findings(limit: int = Query(default=200, ge=1, le=2000)) -> list[DetectionFinding]:
+def list_findings(
+    limit: int = Query(default=200, ge=1, le=2000),
+    authorization: str | None = Header(default=None),
+) -> list[DetectionFinding]:
+    _require_admin_token(authorization)
     return repository.list_findings(limit=limit)
 
 
 @app.get("/api/v1/threats", response_model=list[ThreatCatalogItem])
-def list_threats() -> list[ThreatCatalogItem]:
+def list_threats(
+    authorization: str | None = Header(default=None),
+) -> list[ThreatCatalogItem]:
+    _require_admin_token(authorization)
     return get_catalog()
 
 
 @app.get("/api/v1/dashboard/summary", response_model=DashboardSummary)
-def dashboard_summary() -> DashboardSummary:
+def dashboard_summary(
+    authorization: str | None = Header(default=None),
+) -> DashboardSummary:
+    _require_admin_token(authorization)
     assets = repository.list_assets()
     events = repository.list_events(limit=2000)
     findings = repository.list_findings(limit=2000)
@@ -336,6 +393,21 @@ def endpoint_enroll(
         policy_url=f"/api/v1/endpoint/policy/{enrollment.device_id}",
         message="Endpoint enrolled; store the device credential securely.",
     )
+
+
+@app.post("/api/v1/endpoint/revoke/{device_id}")
+def revoke_endpoint(
+    device_id: str,
+    authorization: str | None = Header(default=None),
+) -> dict[str, object]:
+    _require_admin_token(authorization)
+    revoked = repository.revoke_endpoint_credential(device_id)
+    if not revoked:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Managed endpoint credential was not found",
+        )
+    return {"device_id": device_id, "revoked": True}
 
 
 @app.get("/api/v1/endpoint/policy/{device_id}", response_model=EndpointPolicyBundle)
