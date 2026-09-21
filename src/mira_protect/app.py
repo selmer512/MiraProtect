@@ -42,7 +42,7 @@ from .schemas import (
 
 app = FastAPI(
     title="Mira Protect",
-    version="0.3.0",
+    version="0.4.0",
     description="Vendor-neutral enterprise AI security control plane",
 )
 
@@ -240,7 +240,7 @@ def health() -> dict[str, str]:
     return {
         "status": "ok" if database == "ok" else "degraded",
         "service": "mira-protect",
-        "version": "0.3.0",
+        "version": "0.4.0",
         "database": database,
     }
 
