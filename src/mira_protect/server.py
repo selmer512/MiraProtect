@@ -82,6 +82,9 @@ def main() -> None:
     except (RuntimeError, ValueError) as exc:
         raise SystemExit(str(exc)) from exc
 
+    os.environ["MIRA_BIND_HOST"] = str(args.host)
+    os.environ["MIRA_EFFECTIVE_TLS"] = "true" if args.ssl_certfile and args.ssl_keyfile else "false"
+
     uvicorn.run(
         "mira_protect.app:app",
         host=args.host,
