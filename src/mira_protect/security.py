@@ -77,7 +77,7 @@ def security_status(
 
     if profile == "production" and not effective_tls:
         required.append("tls_configured")
-    elif profile == "development" and remote_bind and not effective_tls:
+    elif profile == "development" and not effective_tls:
         if not _as_bool(os.getenv("MIRA_ALLOW_INSECURE_REMOTE", "false")):
             required.append("tls_configured")
 
