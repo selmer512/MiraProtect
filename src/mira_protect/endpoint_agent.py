@@ -179,6 +179,8 @@ class AgentConfig:
             raise ValueError("tls_client_cert and tls_client_key must be configured together")
         if cfg.tls_ca_file and not cfg.tls_verify:
             raise ValueError("tls_ca_file cannot be used when tls_verify is disabled")
+        if (cfg.tls_client_cert or cfg.tls_client_key) and not cfg.tls_verify:
+            raise ValueError("mTLS client identity requires tls_verify to remain enabled")
         if cfg.require_https and urlparse(cfg.control_plane_url).scheme.lower() != "https":
             raise ValueError("HTTPS is required for this endpoint control-plane connection")
         return cfg
