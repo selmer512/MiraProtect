@@ -46,6 +46,13 @@ def security_status(
     allow_shared = _as_bool(os.getenv("MIRA_ALLOW_SHARED_ENDPOINT_TOKEN", "false"))
     tls_terminated_upstream = _as_bool(os.getenv("MIRA_TLS_TERMINATED_UPSTREAM", "false"))
 
+    if bind_host is None:
+        bind_host = os.getenv("MIRA_BIND_HOST", "127.0.0.1")
+    if tls_enabled is None:
+        tls_enabled = _as_bool(os.getenv("MIRA_EFFECTIVE_TLS", "false")) or bool(
+            os.getenv("MIRA_TLS_CERT_FILE") and os.getenv("MIRA_TLS_KEY_FILE")
+        )
+
     remote_bind = bool(bind_host) and not is_loopback_host(str(bind_host))
     effective_tls = bool(tls_enabled) or tls_terminated_upstream
 
