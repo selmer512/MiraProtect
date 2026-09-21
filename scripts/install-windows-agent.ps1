@@ -92,7 +92,9 @@ $config = @{
     hash_executables = $true
     max_hash_bytes = 104857600
 }
-$config | ConvertTo-Json -Depth 5 | Set-Content -Path $ConfigPath -Encoding UTF8
+$configJson = $config | ConvertTo-Json -Depth 5
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($ConfigPath, $configJson, $utf8NoBom)
 
 # The scheduled-task runner sets MIRA_AGENT_CONFIG only for the agent process.
 # Avoid machine-wide environment variables so isolated/test installs cannot affect other agents.
