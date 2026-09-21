@@ -75,7 +75,9 @@ class AgentConfig:
         config_path = os.getenv("MIRA_AGENT_CONFIG")
         if config_path:
             config_file = Path(config_path).expanduser()
-            with config_file.open("r", encoding="utf-8") as handle:
+            # Windows PowerShell 5.1 writes a UTF-8 BOM with `-Encoding UTF8`.
+            # utf-8-sig accepts both BOM and non-BOM JSON, keeping agent config portable.
+            with config_file.open("r", encoding="utf-8-sig") as handle:
                 data = json.load(handle)
         else:
             config_file = None
