@@ -1,0 +1,59 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8443:8443"
+    environment:
+      MIRA_BIND_HOST: 0.0.0.0
+      MIRA_BIND_PORT: 8443
+      MIRA_SECURITY_PROFILE: development
+      MIRA_DATABASE_URL: postgresql+psycopg://mira:${MIRA_POSTGRES_PASSWORD:?set MIRA_POSTGRES_PASSWORD}@postgres:5432/mira
+      MIRA_REDIS_URL: redis://redis:6379/0
+      MIRA_ADMIN_TOKEN: ${MIRA_ADMIN_TOKEN:?set MIRA_ADMIN_TOKEN}
+      MIRA_ENROLLMENT_TOKEN: ${MIRA_ENROLLMENT_TOKEN:?set MIRA_ENROLLMENT_TOKEN}
+      MIRA_TOKEN_PEPPER: ${MIRA_TOKEN_PEPPER:?set MIRA_TOKEN_PEPPER}
+      MIRA_ENDPOINT_TOKEN: ""
+      MIRA_ALLOW_SHARED_ENDPOINT_TOKEN: "false"
+      MIRA_TLS_CERT_FILE: /run/mira/tls/server.crt
+      MIRA_TLS_KEY_FILE: /run/mira/tls/server.key
+      MIRA_TLS_REQUIRE_CLIENT_CERT: ${MIRA_TLS_REQUIRE_CLIENT_CERT:-false}
+      MIRA_TLS_CLIENT_CA_FILE: ${MIRA_TLS_CLIENT_CA_FILE:-}
+      MIRA_TLS_TERMINATED_UPSTREAM: "false"
+      MIRA_ALLOW_INSECURE_REMOTE: "false"
+      MIRA_ENDPOINT_DENY_PROCESSES: ${MIRA_ENDPOINT_DENY_PROCESSES:-}
+      MIRA_ENDPOINT_PROCESS_NAMES: ${MIRA_ENDPOINT_PROCESS_NAMES:-}
+      MIRA_ENDPOINT_COMMAND_MARKERS: ${MIRA_ENDPOINT_COMMAND_MARKERS:-}
+      MIRA_ENDPOINT_FAIL_CLOSED: ${MIRA_ENDPOINT_FAIL_CLOSED:-false}
+      MIRA_ENDPOINT_POLICY_MODE: ${MIRA_ENDPOINT_POLICY_MODE:-monitor}
+      MIRA_POLICY_REFRESH_SECONDS: ${MIRA_POLICY_REFRESH_SECONDS:-300}
+      MIRA_ENABLE_TEST_CONTROLS: "false"
+    volumes:
+      - ./deploy/tls:/run/mira/tls:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: mira
+      POSTGRES_USER: mira
+      POSTGRES_PASSWORD: ${MIRA_POSTGRES_PASSWORD:?set MIRA_POSTGRES_PASSWORD}
+    volumes:
+      - mira-secure-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mira -d mira"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+volumes:
+  mira-secure-postgres:

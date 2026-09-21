@@ -1,0 +1,33 @@
+{
+  "control_plane_url": "https://mira-protect.example.corp",
+  "device_id": "replace-with-managed-device-id",
+  "credential_path": "C:\\ProgramData\\MiraProtect\\device-token.txt",
+  "policy_cache_path": "C:\\ProgramData\\MiraProtect\\policy-cache.json",
+  "policy_refresh_seconds": 300,
+  "tls_verify": true,
+  "tls_ca_file": "C:\\ProgramData\\MiraProtect\\certs\\control-plane-ca.pem",
+  "tls_client_cert": null,
+  "tls_client_key": null,
+  "require_https": true,
+  "mode": "monitor",
+  "poll_seconds": 2.0,
+  "heartbeat_seconds": 60.0,
+  "request_timeout_seconds": 5.0,
+  "fail_closed": false,
+  "enable_test_controls": false,
+  "hash_executables": true,
+  "max_hash_bytes": 104857600,
+  "process_names": [
+    "claude.exe",
+    "codex.exe",
+    "copilot.exe",
+    "cursor.exe",
+    "gemini.exe",
+    "ollama.exe"
+  ],
+  "command_markers": [
+    "@anthropic-ai/claude-code",
+    "openai codex",
+    "ollama run"
+  ]
+}

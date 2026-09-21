@@ -1,0 +1,27 @@
+{
+  "control_plane_url": "http://127.0.0.1:8080",
+  "mode": "monitor",
+  "poll_seconds": 1.0,
+  "heartbeat_seconds": 30.0,
+  "request_timeout_seconds": 5.0,
+  "fail_closed": false,
+  "hash_executables": true,
+  "max_hash_bytes": 104857600,
+  "process_names": [
+    "aider",
+    "claude",
+    "codex",
+    "cursor",
+    "gemini",
+    "lmstudio",
+    "ollama",
+    "opencode"
+  ],
+  "command_markers": [
+    "@anthropic-ai/claude-code",
+    "aider-chat",
+    "github copilot",
+    "ollama run",
+    "openai codex"
+  ]
+}
