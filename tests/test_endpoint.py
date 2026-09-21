@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 
 os.environ.setdefault("MIRA_DATABASE_URL", "sqlite+pysqlite:///:memory:")
@@ -437,3 +438,24 @@ def test_dashboard_marks_endpoint_with_stale_policy(monkeypatch) -> None:
     summary = client.get("/api/v1/dashboard/summary").json()
     assert summary["enrolled_devices"] == 1
     assert summary["outdated_policy_devices"] == 1
+
+
+def test_agent_config_accepts_utf8_bom(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "agent-config.json"
+    config_path.write_bytes(
+        b"\xef\xbb\xbf"
+        + json.dumps(
+            {
+                "control_plane_url": "http://127.0.0.1:8080",
+                "mode": "monitor",
+                "policy_refresh_seconds": 300,
+            }
+        ).encode("utf-8")
+    )
+    monkeypatch.setenv("MIRA_AGENT_CONFIG", str(config_path))
+    monkeypatch.delenv("MIRA_AGENT_TOKEN", raising=False)
+
+    config = AgentConfig.load()
+
+    assert config.control_plane_url == "http://127.0.0.1:8080"
+    assert config.mode == "monitor"
