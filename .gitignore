@@ -41,3 +41,5 @@ deploy/tls/*.pem
 deploy/tls/*.key
 deploy/tls/*.pfx
 deploy/tls/*.p12
+
+.mira-test-tls-mtls/
