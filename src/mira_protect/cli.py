@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import platform
+import ssl
 import sys
 import time
 from typing import Any
@@ -15,13 +16,40 @@ from .endpoint_agent import AgentConfig, EndpointAgent, TEST_BLOCK_MARKER
 DEFAULT_URL = "http://127.0.0.1:8080"
 
 
+def _tls_verify_context(args: argparse.Namespace) -> bool | ssl.SSLContext:
+    if getattr(args, "insecure", False):
+        return False
+
+    ca_file = getattr(args, "ca_file", None) or os.getenv("MIRA_TLS_CA_FILE")
+    client_cert = getattr(args, "client_cert", None) or os.getenv("MIRA_TLS_CLIENT_CERT")
+    client_key = getattr(args, "client_key", None) or os.getenv("MIRA_TLS_CLIENT_KEY")
+
+    if bool(client_cert) != bool(client_key):
+        raise ValueError("TLS client certificate and key must be configured together")
+
+    context = ssl.create_default_context(cafile=ca_file) if ca_file else ssl.create_default_context()
+    if client_cert and client_key:
+        context.load_cert_chain(certfile=client_cert, keyfile=client_key)
+    return context
+
+
 def _client(args: argparse.Namespace) -> httpx.Client:
     base_url = str(args.url or os.getenv("MIRA_CONTROL_PLANE_URL", DEFAULT_URL)).rstrip("/")
-    token = args.token or os.getenv("MIRA_AGENT_TOKEN") or os.getenv("MIRA_ENDPOINT_TOKEN")
+    token = (
+        args.token
+        or os.getenv("MIRA_ADMIN_TOKEN")
+        or os.getenv("MIRA_AGENT_TOKEN")
+        or os.getenv("MIRA_ENDPOINT_TOKEN")
+    )
     headers = {"User-Agent": "MiraProtectCLI/0.3.0"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    return httpx.Client(base_url=base_url, headers=headers, timeout=args.timeout)
+    return httpx.Client(
+        base_url=base_url,
+        headers=headers,
+        timeout=args.timeout,
+        verify=_tls_verify_context(args),
+    )
 
 
 def _emit(value: Any, as_json: bool) -> None:
@@ -168,8 +196,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Control-plane base URL (default: MIRA_CONTROL_PLANE_URL or http://127.0.0.1:8080)",
     )
-    parser.add_argument("--token", default=None, help="Endpoint/API bearer token")
+    parser.add_argument("--token", default=None, help="Administrative/API bearer token")
     parser.add_argument("--timeout", type=float, default=5.0, help="HTTP timeout in seconds")
+    parser.add_argument("--ca-file", default=None, help="Custom CA bundle for control-plane TLS")
+    parser.add_argument("--client-cert", default=None, help="mTLS client certificate PEM file")
+    parser.add_argument("--client-key", default=None, help="mTLS client private key PEM file")
+    parser.add_argument(
+        "--insecure",
+        action="store_true",
+        help="Disable TLS certificate verification for isolated development only",
+    )
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -220,6 +256,9 @@ def main() -> None:
     args = parser.parse_args()
     try:
         result = int(args.handler(args))
+    except (ValueError, OSError) as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
     except httpx.HTTPStatusError as exc:
         body = exc.response.text[:1000]
         print(f"HTTP {exc.response.status_code}: {body}", file=sys.stderr)
