@@ -32,3 +32,5 @@ dist/
 .vscode/
 .idea/
 .DS_Store
+
+.mira-test-control-plane-security/
