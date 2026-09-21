@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import runpy
+from pathlib import Path
+
 import pytest
+from cryptography import x509
 from fastapi.testclient import TestClient
 
 from mira_protect.app import app, repository
@@ -171,3 +175,24 @@ def test_ready_endpoint_exposes_security_profile_without_secrets(monkeypatch) ->
     assert "development-admin" not in serialized
     assert "development-enrollment" not in serialized
     assert "development-pepper" not in serialized
+
+
+def test_generated_tls_certificates_include_rfc5280_key_identifiers(tmp_path) -> None:
+    script = Path(__file__).resolve().parents[1] / "scripts" / "generate-test-pki.py"
+    generate = runpy.run_path(str(script))["generate"]
+    generate(tmp_path)
+
+    ca = x509.load_pem_x509_certificate((tmp_path / "ca.crt").read_bytes())
+    server = x509.load_pem_x509_certificate((tmp_path / "server.crt").read_bytes())
+    client = x509.load_pem_x509_certificate((tmp_path / "client.crt").read_bytes())
+
+    ca_ski = ca.extensions.get_extension_for_class(x509.SubjectKeyIdentifier).value.digest
+    ca_aki = ca.extensions.get_extension_for_class(x509.AuthorityKeyIdentifier).value.key_identifier
+    assert ca_aki == ca_ski
+
+    for leaf in (server, client):
+        leaf.extensions.get_extension_for_class(x509.SubjectKeyIdentifier)
+        leaf_aki = leaf.extensions.get_extension_for_class(
+            x509.AuthorityKeyIdentifier
+        ).value.key_identifier
+        assert leaf_aki == ca_ski
