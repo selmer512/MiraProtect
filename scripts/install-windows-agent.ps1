@@ -9,6 +9,14 @@ param(
 
     [string]$EnrollmentToken = "",
 
+    [string]$TlsCaFile = "",
+
+    [string]$TlsClientCert = "",
+
+    [string]$TlsClientKey = "",
+
+    [switch]$AllowInsecureHttp,
+
     [string]$DeviceId = $env:COMPUTERNAME.ToLowerInvariant(),
 
     [string]$InstallDir = "$env:ProgramData\MiraProtect",
@@ -63,11 +71,52 @@ function Resolve-AgentExecutable {
 
 Assert-Administrator
 
+try {
+    $ControlPlaneUri = [Uri]$ControlPlaneUrl
+}
+catch {
+    throw "ControlPlaneUrl is not a valid URI: $ControlPlaneUrl"
+}
+if ($ControlPlaneUri.Scheme -notin @("http", "https")) {
+    throw "ControlPlaneUrl must use http or https."
+}
+$IsLoopback = $ControlPlaneUri.IsLoopback -or $ControlPlaneUri.Host -in @("localhost", "127.0.0.1", "::1")
+if (-not $IsLoopback -and $ControlPlaneUri.Scheme -ne "https" -and -not $AllowInsecureHttp) {
+    throw "Remote Mira Protect control planes require HTTPS. Use -AllowInsecureHttp only in an isolated development network."
+}
+if ([bool]$TlsClientCert -ne [bool]$TlsClientKey) {
+    throw "TlsClientCert and TlsClientKey must be supplied together."
+}
+
 New-Item -Path $InstallDir -ItemType Directory -Force | Out-Null
 $LogDir = Join-Path $InstallDir "logs"
 New-Item -Path $LogDir -ItemType Directory -Force | Out-Null
 $CredentialPath = Join-Path $InstallDir "device-token.txt"
 $PolicyCachePath = Join-Path $InstallDir "policy-cache.json"
+$CertDir = Join-Path $InstallDir "certs"
+$InstalledCaFile = $null
+$InstalledClientCert = $null
+$InstalledClientKey = $null
+
+if ($TlsCaFile -or $TlsClientCert -or $TlsClientKey) {
+    New-Item -Path $CertDir -ItemType Directory -Force | Out-Null
+}
+if ($TlsCaFile) {
+    $InstalledCaFile = Join-Path $CertDir "control-plane-ca.pem"
+    Copy-Item -Path (Resolve-Path $TlsCaFile).Path -Destination $InstalledCaFile -Force
+}
+if ($TlsClientCert) {
+    $InstalledClientCert = Join-Path $CertDir "client-cert.pem"
+    Copy-Item -Path (Resolve-Path $TlsClientCert).Path -Destination $InstalledClientCert -Force
+}
+if ($TlsClientKey) {
+    $InstalledClientKey = Join-Path $CertDir "client-key.pem"
+    Copy-Item -Path (Resolve-Path $TlsClientKey).Path -Destination $InstalledClientKey -Force
+    & icacls.exe $InstalledClientKey /inheritance:r /grant:r "SYSTEM:F" "BUILTIN\Administrators:F" | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to apply restrictive ACLs to $InstalledClientKey."
+    }
+}
 
 $SourceExecutable = Resolve-AgentExecutable -RequestedBinary $AgentBinary -Root $RepoRoot
 $InstalledExecutable = Join-Path $InstallDir "MiraProtectAgent.exe"
@@ -83,6 +132,11 @@ $config = @{
     credential_path = $CredentialPath
     policy_cache_path = $PolicyCachePath
     policy_refresh_seconds = 300
+    tls_verify = $true
+    tls_ca_file = $InstalledCaFile
+    tls_client_cert = $InstalledClientCert
+    tls_client_key = $InstalledClientKey
+    require_https = [bool](-not $IsLoopback -and -not $AllowInsecureHttp)
     mode = $Mode
     poll_seconds = 2.0
     heartbeat_seconds = 60.0
@@ -184,6 +238,8 @@ Write-Host "Mira Protect endpoint agent installed." -ForegroundColor Green
 Write-Host "Mode:          $Mode"
 Write-Host "Device ID:     $DeviceId"
 Write-Host "Control plane: $ControlPlaneUrl"
+Write-Host "TLS required:  $([bool](-not $IsLoopback -and -not $AllowInsecureHttp))"
+Write-Host "mTLS client:   $([bool]($InstalledClientCert -and $InstalledClientKey))"
 Write-Host "Install path:  $InstallDir"
 Write-Host "Policy cache:  $PolicyCachePath"
 Write-Host "Task state:    $($task.State)"
