@@ -75,13 +75,11 @@ def security_status(
             if not checks[key]:
                 required.append(key)
 
-    if profile == "production" and not effective_tls:
-        required.append("tls_configured")
-    elif (
-        profile == "development"
-        and not effective_tls
-        and not _as_bool(os.getenv("MIRA_ALLOW_INSECURE_REMOTE", "false"))
-    ):
+    allow_insecure_remote = _as_bool(os.getenv("MIRA_ALLOW_INSECURE_REMOTE", "false"))
+    tls_required = profile == "production" or (
+        profile == "development" and not allow_insecure_remote
+    )
+    if tls_required and not effective_tls:
         required.append("tls_configured")
 
     return {
