@@ -89,6 +89,11 @@ if [[ "${MIRA_SKIP_INSTALL:-0}" != "1" ]]; then
   python -m pip install -e "$ROOT_DIR[dev]" >/dev/null
 fi
 
+export MIRA_SECURITY_PROFILE="local"
+export MIRA_ADMIN_TOKEN=""
+export MIRA_TLS_TERMINATED_UPSTREAM="false"
+export MIRA_ALLOW_INSECURE_REMOTE="false"
+export MIRA_EFFECTIVE_TLS="false"
 export MIRA_DATABASE_URL="sqlite+pysqlite:///$TEST_ROOT/mira.db"
 export MIRA_CONTROL_PLANE_URL="$CONTROL_PLANE_URL"
 export MIRA_ENDPOINT_TOKEN="$TOKEN"
