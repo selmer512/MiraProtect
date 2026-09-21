@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import platform
+import ssl
 import socket
 import sys
 import time
@@ -12,6 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 import psutil
@@ -57,6 +59,11 @@ class AgentConfig:
     credential_path: str | None = None
     policy_cache_path: str | None = None
     policy_refresh_seconds: float = 300.0
+    tls_verify: bool = True
+    tls_ca_file: str | None = None
+    tls_client_cert: str | None = None
+    tls_client_key: str | None = None
+    require_https: bool = False
     device_id: str = field(default_factory=lambda: socket.gethostname().lower())
     mode: str = "monitor"
     poll_seconds: float = 2.0
@@ -108,6 +115,21 @@ class AgentConfig:
             "MIRA_ENROLLMENT_TOKEN",
             data.get("enrollment_token"),
         )
+        cfg.tls_verify = _as_bool(
+            os.getenv("MIRA_TLS_VERIFY", data.get("tls_verify", cfg.tls_verify))
+        )
+        cfg.tls_ca_file = os.getenv("MIRA_TLS_CA_FILE", data.get("tls_ca_file"))
+        cfg.tls_client_cert = os.getenv(
+            "MIRA_TLS_CLIENT_CERT",
+            data.get("tls_client_cert"),
+        )
+        cfg.tls_client_key = os.getenv(
+            "MIRA_TLS_CLIENT_KEY",
+            data.get("tls_client_key"),
+        )
+        cfg.require_https = _as_bool(
+            os.getenv("MIRA_REQUIRE_HTTPS", data.get("require_https", cfg.require_https))
+        )
         cfg.device_id = str(os.getenv("MIRA_DEVICE_ID", data.get("device_id", cfg.device_id)))
         cfg.mode = str(os.getenv("MIRA_AGENT_MODE", data.get("mode", cfg.mode))).lower()
         cfg.poll_seconds = float(
@@ -153,6 +175,12 @@ class AgentConfig:
             raise ValueError("poll_seconds must be at least 0.25 seconds")
         if cfg.policy_refresh_seconds < 30:
             raise ValueError("policy_refresh_seconds must be at least 30 seconds")
+        if bool(cfg.tls_client_cert) != bool(cfg.tls_client_key):
+            raise ValueError("tls_client_cert and tls_client_key must be configured together")
+        if cfg.tls_ca_file and not cfg.tls_verify:
+            raise ValueError("tls_ca_file cannot be used when tls_verify is disabled")
+        if cfg.require_https and urlparse(cfg.control_plane_url).scheme.lower() != "https":
+            raise ValueError("HTTPS is required for this endpoint control-plane connection")
         return cfg
 
 
@@ -188,6 +216,23 @@ def _write_secret(path: str, value: str) -> None:
     os.replace(temporary, destination)
     with contextlib.suppress(OSError):
         os.chmod(destination, 0o600)
+
+
+def _tls_verify_context(config: AgentConfig) -> bool | ssl.SSLContext:
+    if not config.tls_verify:
+        return False
+
+    if config.tls_ca_file:
+        context = ssl.create_default_context(cafile=config.tls_ca_file)
+    else:
+        context = ssl.create_default_context()
+
+    if config.tls_client_cert and config.tls_client_key:
+        context.load_cert_chain(
+            certfile=config.tls_client_cert,
+            keyfile=config.tls_client_key,
+        )
+    return context
 
 
 def _sha256(path: str | None, max_bytes: int) -> str | None:
@@ -239,6 +284,7 @@ class EndpointAgent:
             base_url=config.control_plane_url,
             headers=headers,
             timeout=config.request_timeout_seconds,
+            verify=_tls_verify_context(config),
         )
         self._load_policy_cache()
 
@@ -474,6 +520,9 @@ class EndpointAgent:
             fail_closed=self.config.fail_closed,
             test_controls=self.config.enable_test_controls,
             policy_version=self.policy_version,
+            tls_verify=self.config.tls_verify,
+            require_https=self.config.require_https,
+            mtls=bool(self.config.tls_client_cert and self.config.tls_client_key),
         )
         try:
             while True:
