@@ -168,7 +168,7 @@ if (-not (Test-Path $StagedAgentExe)) {
 
 $hash = (Get-FileHash -Path $StagedAgentExe -Algorithm SHA256).Hash.ToLowerInvariant()
 $shortHash = $hash.Substring(0, 12)
-$VersionedAgentExe = Join-Path $OutputDir "MiraProtectAgent-0.3.0-$shortHash.exe"
+$VersionedAgentExe = Join-Path $OutputDir "MiraProtectAgent-0.4.0-$shortHash.exe"
 Copy-Item $StagedAgentExe $VersionedAgentExe -Force
 
 $PublishedAgentExe = $AgentExe
@@ -200,7 +200,7 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
 
 $buildInfo = [ordered]@{
     product = "Mira Protect Endpoint Agent"
-    version = "0.3.0"
+    version = "0.4.0"
     platform = "windows"
     architecture = $env:PROCESSOR_ARCHITECTURE
     built_at_utc = [DateTime]::UtcNow.ToString("o")
